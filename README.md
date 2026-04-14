@@ -123,6 +123,9 @@ Claude Code（結果を受け取り、回答に組み込む）
 | `/bosai/forecast/data/overview_forecast/{code}.json` | 天気概況テキスト | `get_overview` |
 | `/bosai/warning/data/warning/{code}.json` | 警報・注意報発表状況 | `get_warning` |
 | `/bosai/probability/data/probability/{code}.json` | 早期注意情報（警報級の可能性） | `get_early_warning` |
+| `data.jma.go.jp /stats/data/mdrr/{category}/alltable/{elem}_rct.csv` | 最新観測値（降水量・気温・風速・積雪 等） | `get_mdrr_data` |
+| `data.jma.go.jp /stats/data/mdrr/rank_daily/data{MMDD}.html` | 全国観測値ランキング（上位10地点） | `get_daily_ranking` |
+| `data.jma.go.jp /stats/data/mdrr/rank_update/d{MMDD}.html` | 観測史上1位の値 更新状況 | `get_record_update` |
 
 ### JSONデータの変換処理
 
@@ -151,14 +154,33 @@ Claude Code（結果を受け取り、回答に組み込む）
 
 ## 利用可能なツール
 
+### 予報・警報系（エリアコード指定）
+
 | ツール名 | 説明 | 引数 |
 |---|---|---|
 | `search_area` | 地域名（部分一致）でエリアコードを検索 | `name`: 検索キーワード |
-| `get_forecast` | 3日間の短期天気予報を取得 | `area_code`: エリアコード |
-| `get_weekly_forecast` | 週間天気予報を取得 | `area_code`: エリアコード |
-| `get_overview` | 天気概況テキストを取得 | `area_code`: エリアコード |
-| `get_warning` | 警報・注意報の発表状況を取得 | `area_code`: エリアコード |
-| `get_early_warning` | 早期注意情報（警報級の可能性）を取得 | `area_code`: エリアコード |
+| `get_forecast` | 3日間の短期天気予報を取得 | `area_code` |
+| `get_weekly_forecast` | 週間天気予報を取得 | `area_code` |
+| `get_overview` | 天気概況テキストを取得 | `area_code` |
+| `get_warning` | 警報・注意報の発表状況を取得 | `area_code` |
+| `get_early_warning` | 早期注意情報（警報級の可能性）と気象台コメントを取得 | `area_code` |
+
+### 気象の状況・観測値系（全国データ）
+
+| ツール名 | 説明 | 引数 |
+|---|---|---|
+| `get_mdrr_data` | 全国観測所の最新値を取得（降水量・気温・風速・積雪 等 20種） | `element`（必須）, `prefecture`（都道府県フィルタ）, `top_n`（件数） |
+| `get_daily_ranking` | 全国観測値ランキング（上位10地点）を取得 | `date`（MM/DD、省略=今日）, `element`（要素フィルタ） |
+| `get_record_update` | 観測史上1位の値 更新状況を取得 | `date`（MM/DD、省略=今日） |
+
+#### `get_mdrr_data` の element キー一覧
+
+| カテゴリ | キー |
+|---|---|
+| 降水量 | `pre1h` / `pre3h` / `pre6h` / `pre12h` / `pre24h` / `pre48h` / `pre72h` / `predaily` |
+| 風速 | `mxwsp`（最大風速）/ `gust`（最大瞬間風速） |
+| 気温 | `mxtem`（最高気温）/ `mntem`（最低気温） |
+| 積雪・降雪 | `snc` / `mxsnc` / `snd3h` / `snd6h` / `snd12h` / `snd24h` / `snd48h` / `snd72h` |
 
 ### エリアコードの例
 
@@ -231,7 +253,12 @@ Claude Code のチャットで自然言語で質問するだけです。
 「東京の今日の天気を教えて」
 「大阪の週間天気予報は？」
 「沖縄の天気概況を見せて」
-「福岡はどんな天気？」
+「沖縄への注意報の発表状況は？」
+「沖縄県への早期注意情報を教えて」
+「今日の全国降水量ランキングを見せて」
+「沖縄の最高気温を全地点確認したい」
+「今日、観測史上1位を更新した地点は？」
+「北海道の積雪上位10地点は？」
 ```
 
 Claudeが自動でツールを選択し、気象庁から最新データを取得して回答します。
