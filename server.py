@@ -19,6 +19,67 @@ JST = timezone(timedelta(hours=9))
 # JMA API エンドポイント
 FORECAST_URL = "https://www.jma.go.jp/bosai/forecast/data/forecast/{area_code}.json"
 OVERVIEW_URL = "https://www.jma.go.jp/bosai/forecast/data/overview_forecast/{area_code}.json"
+WARNING_URL  = "https://www.jma.go.jp/bosai/warning/data/warning/{area_code}.json"
+
+# 警報・注意報コード → 名称マッピング（気象庁TELOPS準拠）
+WARNING_CODE_MAP = {
+    # 警報
+    "02": "大雨警報",
+    "03": "洪水警報",
+    "10": "暴風警報",
+    "12": "暴風雪警報",
+    "13": "大雪警報",
+    "14": "波浪警報",
+    "15": "高潮警報",
+    # 注意報
+    "20": "波浪注意報",
+    "21": "強風注意報",
+    "22": "大雨注意報",
+    "23": "洪水注意報",
+    "24": "大雪注意報",
+    "25": "高潮注意報",
+    "26": "霜注意報",
+    "27": "雷注意報",
+    "28": "乾燥注意報",
+    "29": "濃霧注意報",
+    "30": "なだれ注意報",
+    "31": "低温注意報",
+    "32": "着氷注意報",
+    "33": "着雪注意報",
+    "34": "融雪注意報",
+    # 特別警報
+    "01": "大雨特別警報",
+    "06": "暴風特別警報",
+    "07": "高潮特別警報",
+    "08": "波浪特別警報",
+    "09": "大雪特別警報",
+    "11": "暴風雪特別警報",
+}
+
+# 警報ステータスの優先度（表示順ソート用）
+WARNING_STATUS_ORDER = {"発表": 0, "継続": 1, "更新": 2, "解除": 3}
+
+# 警報・注意報エリアコード → 地域名（class10s / class15s）
+WARNING_AREA_NAME_MAP = {
+    # 沖縄本島地方
+    "471010": "本島中南部", "471020": "本島北部", "471030": "久米島",
+    # 大東島地方
+    "472010": "南大東島", "472020": "北大東島",
+    # 宮古島地方
+    "473010": "宮古島", "473020": "多良間島",
+    # 八重山地方
+    "474010": "石垣島", "474020": "西表島・竹富島・小浜島・黒島・新城島・波照間島",
+    "474030": "与那国島",
+    # 北海道
+    "011010": "石狩地方北部", "011020": "石狩地方南部",
+    "012010": "渡島地方北部", "012020": "渡島地方南部",
+    # 東北
+    "040010": "宮城県北部", "040020": "宮城県南部・仙台",
+    # 関東
+    "130010": "東京地方", "130020": "伊豆諸島北部", "130030": "伊豆諸島南部",
+    "130040": "小笠原諸島",
+    # その他主要地方（class10s）
+}
 
 # HTTPリクエスト共通ヘッダー（JMA利用規約対応）
 HEADERS = {"User-Agent": "jma_mcp/1.0 (educational use)"}
@@ -160,6 +221,20 @@ async def list_tools() -> list[Tool]:
                 "required": ["name"],
             },
         ),
+        Tool(
+            name="get_warning",
+            description="エリアコードを指定して警報・注意報の発表状況を取得する",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "area_code": {
+                        "type": "string",
+                        "description": "気象庁エリアコード（例: '471000' = 沖縄本島地方）",
+                    }
+                },
+                "required": ["area_code"],
+            },
+        ),
     ]
 
 
@@ -174,6 +249,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         result = await _get_overview(arguments["area_code"])
     elif name == "search_area":
         result = await _search_area(arguments["name"])
+    elif name == "get_warning":
+        result = await _get_warning(arguments["area_code"])
     else:
         result = f"エラー: 未知のツール '{name}'"
 
@@ -325,6 +402,79 @@ async def _get_overview(area_code: str) -> str:
         lines.append("概況テキストがありません。")
 
     return "\n".join(lines)
+
+
+async def _get_warning(area_code: str) -> str:
+    """警報・注意報の発表状況を取得して整形する"""
+    area_name = AREA_CODE_MAP.get(area_code, area_code)
+    url = WARNING_URL.format(area_code=area_code)
+
+    try:
+        data = fetch_json(url)
+    except requests.exceptions.RequestException as e:
+        return f"エラー: 警報データの取得に失敗しました。\n詳細: {e}"
+
+    report_datetime = data.get("reportDatetime", "")
+    publishing_office = data.get("publishingOffice", "")
+    headline = data.get("headlineText", "")
+
+    lines = [f"【{area_name} 警報・注意報】", ""]
+    if report_datetime:
+        lines.append(f"発表: {format_date_jp(report_datetime)}")
+    if publishing_office:
+        lines.append(f"発表機関: {publishing_office}")
+    if headline:
+        lines.append(f"見出し: {headline}")
+    lines.append("")
+
+    # areaTypes[0]: 地域区分（class10）レベルで集計
+    area_types = data.get("areaTypes", [])
+    if not area_types:
+        lines.append("警報・注意報データがありません。")
+        return "\n".join(lines)
+
+    # 発表中・解除以外を先に、解除を後にまとめる
+    active_entries = []
+    cleared_entries = []
+
+    for area_info in area_types[0].get("areas", []):
+        code = area_info.get("code", "")
+        name_str = WARNING_AREA_NAME_MAP.get(code, code)
+        warnings = area_info.get("warnings", [])
+
+        active_warnings = []
+        cleared_warnings = []
+
+        for w in warnings:
+            w_code = str(w.get("code", ""))
+            status = w.get("status", "")
+            w_name = WARNING_CODE_MAP.get(w_code, f"不明({w_code})")
+            if status == "解除":
+                cleared_warnings.append(f"{w_name}（{status}）")
+            elif status:
+                active_warnings.append(f"{w_name}（{status}）")
+
+        if active_warnings:
+            active_entries.append((name_str, active_warnings))
+        if cleared_warnings:
+            cleared_entries.append((name_str, cleared_warnings))
+
+    if active_entries:
+        lines.append("■ 発表中")
+        for name_str, ws in active_entries:
+            lines.append(f"  {name_str}: {' / '.join(ws)}")
+        lines.append("")
+
+    if cleared_entries:
+        lines.append("■ 解除")
+        for name_str, ws in cleared_entries:
+            lines.append(f"  {name_str}: {' / '.join(ws)}")
+        lines.append("")
+
+    if not active_entries and not cleared_entries:
+        lines.append("現在、発表中の警報・注意報はありません。")
+
+    return "\n".join(lines).rstrip()
 
 
 async def _search_area(name: str) -> str:
