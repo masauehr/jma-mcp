@@ -561,6 +561,7 @@ async def _get_early_warning(area_code: str) -> str:
         header = "  地域" + "".join(f"  {lbl}" for lbl in time_labels)
         lines.append(header)
 
+        comment_lines = []  # 気象台コメントを別途収集
         for area_info in short_early_ts.get("areas", []):
             code = area_info.get("code", "")
             area_label = WARNING_AREA_NAME_MAP.get(code, code)
@@ -582,9 +583,18 @@ async def _get_early_warning(area_code: str) -> str:
 
             if printed_props:
                 lines.extend(printed_props)
-                if text:
-                    lines.append(f"    → {text}")
+
+            # コメントは常に収集（確率表示の有無に関わらず）
+            if text:
+                comment_lines.append(f"  {area_label}: {text}")
+
         lines.append("")
+
+        # 気象台コメントセクション
+        if comment_lines:
+            lines.append("■ 気象台コメント（短期）")
+            lines.extend(comment_lines)
+            lines.append("")
 
     # 週間（明後日以降）の警報級の可能性 — data[1]
     if len(data) > 1:
