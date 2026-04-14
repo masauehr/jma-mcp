@@ -17,9 +17,10 @@ from areas import AREA_CODE_MAP, search_area_by_name
 JST = timezone(timedelta(hours=9))
 
 # JMA API エンドポイント
-FORECAST_URL = "https://www.jma.go.jp/bosai/forecast/data/forecast/{area_code}.json"
-OVERVIEW_URL = "https://www.jma.go.jp/bosai/forecast/data/overview_forecast/{area_code}.json"
-WARNING_URL  = "https://www.jma.go.jp/bosai/warning/data/warning/{area_code}.json"
+FORECAST_URL     = "https://www.jma.go.jp/bosai/forecast/data/forecast/{area_code}.json"
+OVERVIEW_URL     = "https://www.jma.go.jp/bosai/forecast/data/overview_forecast/{area_code}.json"
+WARNING_URL      = "https://www.jma.go.jp/bosai/warning/data/warning/{area_code}.json"
+PROBABILITY_URL  = "https://www.jma.go.jp/bosai/probability/data/probability/{area_code}.json"
 
 # 警報・注意報コード → 名称マッピング（気象庁TELOPS準拠）
 WARNING_CODE_MAP = {
@@ -235,6 +236,20 @@ async def list_tools() -> list[Tool]:
                 "required": ["area_code"],
             },
         ),
+        Tool(
+            name="get_early_warning",
+            description="エリアコードを指定して早期注意情報（警報級の可能性）を取得する。今日・明日・明後日以降の大雨・暴風・大雪・波浪・高潮などの警報級現象の可能性（高・中・なし）を確認できる",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "area_code": {
+                        "type": "string",
+                        "description": "気象庁エリアコード（例: '471000' = 沖縄本島地方）",
+                    }
+                },
+                "required": ["area_code"],
+            },
+        ),
     ]
 
 
@@ -251,6 +266,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         result = await _search_area(arguments["name"])
     elif name == "get_warning":
         result = await _get_warning(arguments["area_code"])
+    elif name == "get_early_warning":
+        result = await _get_early_warning(arguments["area_code"])
     else:
         result = f"エラー: 未知のツール '{name}'"
 
@@ -473,6 +490,140 @@ async def _get_warning(area_code: str) -> str:
 
     if not active_entries and not cleared_entries:
         lines.append("現在、発表中の警報・注意報はありません。")
+
+    return "\n".join(lines).rstrip()
+
+
+async def _get_early_warning(area_code: str) -> str:
+    """早期注意情報（警報級の可能性）を取得して整形する"""
+    area_name = AREA_CODE_MAP.get(area_code, area_code)
+    url = PROBABILITY_URL.format(area_code=area_code)
+
+    try:
+        data = fetch_json(url)
+    except requests.exceptions.RequestException as e:
+        return f"エラー: 早期注意情報の取得に失敗しました。\n詳細: {e}"
+
+    if not data:
+        return "エラー: 早期注意情報データが空です。"
+
+    # 可能性ラベルの表示変換（空文字は「低い」または「情報なし」）
+    def fmt_prob(val: str) -> str:
+        if val in ("高", "中"):
+            return val
+        if val == "なし":
+            return "なし"
+        return "—"
+
+    # 警報級の可能性を持つプロパティのみ抽出するヘルパー
+    EARLY_TYPES = {
+        "雨の警報級の可能性",
+        "雪の警報級の可能性",
+        "風（風雪）の警報級の可能性",
+        "波の警報級の可能性",
+        "潮位の警報級の可能性",
+    }
+
+    lines = [f"【{area_name} 早期注意情報（警報級の可能性）】", ""]
+
+    # 発表情報（data[0] から取得）
+    first = data[0]
+    report_datetime = first.get("reportDatetime", "")
+    publishing_office = first.get("publishingOffice", "")
+    if report_datetime:
+        lines.append(f"発表: {format_date_jp(report_datetime)}")
+    if publishing_office:
+        lines.append(f"発表機関: {publishing_office}")
+    lines.append("")
+
+    # 短期（今日夜・明日）の警報級の可能性 — data[0] の timeSeries から抽出
+    short_ts = first.get("timeSeries", [])
+    short_early_ts = None
+    for ts in short_ts:
+        areas = ts.get("areas", [])
+        if areas and "properties" in areas[0]:
+            props = areas[0]["properties"]
+            if any(p.get("type") in EARLY_TYPES for p in props):
+                short_early_ts = ts
+                break
+
+    if short_early_ts:
+        time_defines = short_early_ts.get("timeDefines", [])
+        # 時刻ラベルを作成（例: 15日夜、16日昼）
+        time_labels = []
+        for td in time_defines:
+            dt = datetime.fromisoformat(td).astimezone(JST)
+            hour = dt.hour
+            period = "夜" if hour >= 18 or hour < 6 else "昼前後"
+            time_labels.append(f"{dt.month}/{dt.day}({['月','火','水','木','金','土','日'][dt.weekday()]}){period}")
+
+        lines.append("■ 短期（今日夜～明日）")
+        header = "  地域" + "".join(f"  {lbl}" for lbl in time_labels)
+        lines.append(header)
+
+        for area_info in short_early_ts.get("areas", []):
+            code = area_info.get("code", "")
+            area_label = WARNING_AREA_NAME_MAP.get(code, code)
+            text = area_info.get("text", "")
+            props = area_info.get("properties", [])
+
+            # 警報級の可能性プロパティのみ表示
+            printed_props = []
+            for prop in props:
+                ptype = prop.get("type", "")
+                if ptype not in EARLY_TYPES:
+                    continue
+                probs = prop.get("probabilities", [])
+                prob_strs = [fmt_prob(p) for p in probs]
+                # 全て「—」なら省略
+                if all(p == "—" for p in prob_strs):
+                    continue
+                printed_props.append(f"  [{area_label}] {ptype}: {' / '.join(prob_strs)}")
+
+            if printed_props:
+                lines.extend(printed_props)
+                if text:
+                    lines.append(f"    → {text}")
+        lines.append("")
+
+    # 週間（明後日以降）の警報級の可能性 — data[1]
+    if len(data) > 1:
+        weekly = data[1]
+        weekly_ts = weekly.get("timeSeries", [])
+        for ts in weekly_ts:
+            time_defines = ts.get("timeDefines", [])
+            areas = ts.get("areas", [])
+            if not areas:
+                continue
+            props_sample = areas[0].get("properties", [])
+            if not any(p.get("type") in EARLY_TYPES for p in props_sample):
+                continue
+
+            time_labels = [
+                f"{datetime.fromisoformat(td).astimezone(JST).strftime('%m/%d')}"
+                for td in time_defines
+            ]
+
+            lines.append("■ 週間（明後日以降）")
+            lines.append("  地域: " + " / ".join(time_labels))
+
+            for area_info in areas:
+                code = area_info.get("code", "")
+                area_label = WARNING_AREA_NAME_MAP.get(code, AREA_CODE_MAP.get(code, code))
+                for prop in area_info.get("properties", []):
+                    ptype = prop.get("type", "")
+                    if ptype not in EARLY_TYPES:
+                        continue
+                    probs = prop.get("probabilities", [])
+                    prob_strs = [fmt_prob(p) for p in probs]
+                    if all(p == "—" for p in prob_strs):
+                        continue
+                    lines.append(f"  [{area_label}] {ptype}: {' / '.join(prob_strs)}")
+            lines.append("")
+
+    # 短期・週間ともに出力なし
+    if len(lines) <= 4:
+        lines.append("現在、警報級の可能性が高い・中程度の現象はありません。")
 
     return "\n".join(lines).rstrip()
 

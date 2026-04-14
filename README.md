@@ -122,6 +122,7 @@ Claude Code（結果を受け取り、回答に組み込む）
 | `/bosai/forecast/data/forecast/{code}.json` | 3日間予報・週間予報 | `get_forecast` / `get_weekly_forecast` |
 | `/bosai/forecast/data/overview_forecast/{code}.json` | 天気概況テキスト | `get_overview` |
 | `/bosai/warning/data/warning/{code}.json` | 警報・注意報発表状況 | `get_warning` |
+| `/bosai/probability/data/probability/{code}.json` | 早期注意情報（警報級の可能性） | `get_early_warning` |
 
 ### JSONデータの変換処理
 
@@ -157,6 +158,7 @@ Claude Code（結果を受け取り、回答に組み込む）
 | `get_weekly_forecast` | 週間天気予報を取得 | `area_code`: エリアコード |
 | `get_overview` | 天気概況テキストを取得 | `area_code`: エリアコード |
 | `get_warning` | 警報・注意報の発表状況を取得 | `area_code`: エリアコード |
+| `get_early_warning` | 早期注意情報（警報級の可能性）を取得 | `area_code`: エリアコード |
 
 ### エリアコードの例
 
