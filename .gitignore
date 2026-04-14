@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# ローカル設定（絶対パスが含まれるため）
+.mcp.json
+
+# Claude Code ローカル設定
+.claude/
+
+# 環境変数
+.env
