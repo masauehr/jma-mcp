@@ -21,6 +21,32 @@ FORECAST_URL     = "https://www.jma.go.jp/bosai/forecast/data/forecast/{area_cod
 OVERVIEW_URL     = "https://www.jma.go.jp/bosai/forecast/data/overview_forecast/{area_code}.json"
 WARNING_URL      = "https://www.jma.go.jp/bosai/warning/data/warning/{area_code}.json"
 PROBABILITY_URL  = "https://www.jma.go.jp/bosai/probability/data/probability/{area_code}.json"
+MDRR_BASE_URL    = "https://www.data.jma.go.jp/stats/data/mdrr"
+
+# 気象の状況 CSV エレメント定義
+# key → (表示名, CSVパス, 単位, ソート順)
+MDRR_ELEMENTS = {
+    "pre1h":    ("1時間降水量",   "pre_rct/alltable/pre1h00_rct.csv",       "mm",   "desc"),
+    "pre3h":    ("3時間降水量",   "pre_rct/alltable/pre3h00_rct.csv",       "mm",   "desc"),
+    "pre6h":    ("6時間降水量",   "pre_rct/alltable/pre6h00_rct.csv",       "mm",   "desc"),
+    "pre12h":   ("12時間降水量",  "pre_rct/alltable/pre12h00_rct.csv",      "mm",   "desc"),
+    "pre24h":   ("24時間降水量",  "pre_rct/alltable/pre24h00_rct.csv",      "mm",   "desc"),
+    "pre48h":   ("48時間降水量",  "pre_rct/alltable/pre48h00_rct.csv",      "mm",   "desc"),
+    "pre72h":   ("72時間降水量",  "pre_rct/alltable/pre72h00_rct.csv",      "mm",   "desc"),
+    "predaily": ("日降水量",      "pre_rct/alltable/predaily00_rct.csv",    "mm",   "desc"),
+    "mxwsp":    ("最大風速",      "wind_rct/alltable/mxwsp00_rct.csv",      "m/s",  "desc"),
+    "gust":     ("最大瞬間風速",  "wind_rct/alltable/gust00_rct.csv",       "m/s",  "desc"),
+    "mxtem":    ("最高気温",      "tem_rct/alltable/mxtemsadext00_rct.csv", "℃",   "desc"),
+    "mntem":    ("最低気温",      "tem_rct/alltable/mntemsadext00_rct.csv", "℃",   "asc"),
+    "snc":      ("現在の積雪",    "snc_rct/alltable/snc00_rct.csv",         "cm",   "desc"),
+    "mxsnc":    ("最深積雪",      "snc_rct/alltable/mxsnc00_rct.csv",       "cm",   "desc"),
+    "snd3h":    ("3時間降雪量",   "snc_rct/alltable/snd3h00_rct.csv",       "cm",   "desc"),
+    "snd6h":    ("6時間降雪量",   "snc_rct/alltable/snd6h00_rct.csv",       "cm",   "desc"),
+    "snd12h":   ("12時間降雪量",  "snc_rct/alltable/snd12h00_rct.csv",      "cm",   "desc"),
+    "snd24h":   ("24時間降雪量",  "snc_rct/alltable/snd24h00_rct.csv",      "cm",   "desc"),
+    "snd48h":   ("48時間降雪量",  "snc_rct/alltable/snd48h00_rct.csv",      "cm",   "desc"),
+    "snd72h":   ("72時間降雪量",  "snc_rct/alltable/snd72h00_rct.csv",      "cm",   "desc"),
+}
 
 # 警報・注意報コード → 名称マッピング（気象庁TELOPS準拠）
 WARNING_CODE_MAP = {
@@ -250,6 +276,39 @@ async def list_tools() -> list[Tool]:
                 "required": ["area_code"],
             },
         ),
+        Tool(
+            name="get_mdrr_data",
+            description=(
+                "気象庁「最新の気象データ（気象の状況）」から全国観測所の最新値を取得する。"
+                "降水量・風速・気温・積雪・降雪量などを都道府県フィルタや上位N件で絞り込める。"
+                "element に指定できる値: "
+                "pre1h(1時間降水量), pre3h(3時間), pre6h(6時間), pre12h(12時間), "
+                "pre24h(24時間), pre48h(48時間), pre72h(72時間), predaily(日降水量), "
+                "mxwsp(最大風速), gust(最大瞬間風速), "
+                "mxtem(最高気温), mntem(最低気温), "
+                "snc(現在の積雪), mxsnc(最深積雪), "
+                "snd3h(3時間降雪量), snd6h(6時間), snd12h(12時間), "
+                "snd24h(24時間), snd48h(48時間), snd72h(72時間)"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "element": {
+                        "type": "string",
+                        "description": "取得する気象要素のキー（例: 'pre24h', 'mxtem', 'snc'）",
+                    },
+                    "prefecture": {
+                        "type": "string",
+                        "description": "都道府県名でフィルタ（部分一致、例: '沖縄', '北海道'）。省略時は全国",
+                    },
+                    "top_n": {
+                        "type": "integer",
+                        "description": "上位N件を返す（デフォルト20、0で全件）",
+                    },
+                },
+                "required": ["element"],
+            },
+        ),
     ]
 
 
@@ -268,6 +327,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         result = await _get_warning(arguments["area_code"])
     elif name == "get_early_warning":
         result = await _get_early_warning(arguments["area_code"])
+    elif name == "get_mdrr_data":
+        result = await _get_mdrr_data(
+            arguments["element"],
+            arguments.get("prefecture", ""),
+            int(arguments.get("top_n", 20)),
+        )
     else:
         result = f"エラー: 未知のツール '{name}'"
 
@@ -636,6 +701,106 @@ async def _get_early_warning(area_code: str) -> str:
         lines.append("現在、警報級の可能性が高い・中程度の現象はありません。")
 
     return "\n".join(lines).rstrip()
+
+
+async def _get_mdrr_data(element: str, prefecture: str = "", top_n: int = 20) -> str:
+    """気象の状況CSVを取得して整形する"""
+    if element not in MDRR_ELEMENTS:
+        keys = ", ".join(MDRR_ELEMENTS.keys())
+        return f"エラー: 不明な要素 '{element}'。\n使用可能なキー: {keys}"
+
+    label, csv_path, unit, sort_order = MDRR_ELEMENTS[element]
+    url = f"{MDRR_BASE_URL}/{csv_path}"
+
+    try:
+        response = requests.get(url, headers=HEADERS, timeout=30)
+        response.raise_for_status()
+        text = response.content.decode("shift_jis", errors="replace")
+    except requests.exceptions.RequestException as e:
+        return f"エラー: データ取得に失敗しました。\n詳細: {e}"
+
+    lines = text.strip().splitlines()
+    if len(lines) < 2:
+        return "エラー: データが空です。"
+
+    header = lines[0].split(",")
+    # 列インデックス（共通）
+    # 0:観測所番号, 1:都道府県, 2:地点, 4-8:現在時刻, 9:主要値
+    IDX_PREF  = 1
+    IDX_NAME  = 2
+    IDX_YEAR  = 4
+    IDX_MON   = 5
+    IDX_DAY   = 6
+    IDX_HOUR  = 7
+    IDX_MIN   = 8
+    IDX_VALUE = 9
+
+    value_col_name = header[IDX_VALUE] if len(header) > IDX_VALUE else "値"
+
+    # データ行をパース
+    records = []
+    for line in lines[1:]:
+        cols = line.split(",")
+        if len(cols) <= IDX_VALUE:
+            continue
+        pref  = cols[IDX_PREF].strip()
+        name  = cols[IDX_NAME].strip()
+        val_s = cols[IDX_VALUE].strip()
+
+        # 都道府県フィルタ
+        if prefecture and prefecture not in pref:
+            continue
+
+        # 値を数値変換（空・非数値はスキップ）
+        try:
+            val = float(val_s)
+        except (ValueError, TypeError):
+            continue
+
+        # 観測時刻
+        try:
+            obs_time = f"{cols[IDX_YEAR]}/{cols[IDX_MON]}/{cols[IDX_DAY]} {cols[IDX_HOUR]}:{cols[IDX_MIN]}"
+        except IndexError:
+            obs_time = ""
+
+        records.append({"pref": pref, "name": name, "value": val, "time": obs_time})
+
+    if not records:
+        pref_msg = f"（{prefecture}）" if prefecture else ""
+        return f"該当データがありませんでした{pref_msg}。"
+
+    # ソート
+    reverse = (sort_order == "desc")
+    records.sort(key=lambda x: x["value"], reverse=reverse)
+
+    # 上位N件
+    if top_n > 0:
+        records = records[:top_n]
+
+    # ヘッダー構築
+    pref_label = f"（{prefecture}）" if prefecture else "（全国）"
+    obs_time_sample = records[0]["time"] if records else ""
+    lines_out = [
+        f"【{label}{pref_label} 最新値】",
+        "",
+        f"観測時刻: {obs_time_sample}",
+        f"ランキング基準: {value_col_name}",
+        "",
+    ]
+
+    rank_label = "上位" if reverse else "下位"
+    lines_out.append(f"{'順位':<4} {'都道府県':<14} {'地点':<22} {value_col_name}")
+    lines_out.append("─" * 65)
+
+    for i, rec in enumerate(records, 1):
+        lines_out.append(
+            f"{i:<4} {rec['pref']:<14} {rec['name']:<22} {rec['value']}"
+        )
+
+    total = len(records)
+    lines_out.append(f"\n表示: {total}件")
+
+    return "\n".join(lines_out)
 
 
 async def _search_area(name: str) -> str:
