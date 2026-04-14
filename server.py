@@ -3,6 +3,7 @@ JMA MCP サーバー
 気象庁APIをMCPツールとして公開するstdioベースのサーバー
 """
 import asyncio
+import re
 import sys
 from datetime import datetime, timezone, timedelta
 
@@ -21,7 +22,9 @@ FORECAST_URL     = "https://www.jma.go.jp/bosai/forecast/data/forecast/{area_cod
 OVERVIEW_URL     = "https://www.jma.go.jp/bosai/forecast/data/overview_forecast/{area_code}.json"
 WARNING_URL      = "https://www.jma.go.jp/bosai/warning/data/warning/{area_code}.json"
 PROBABILITY_URL  = "https://www.jma.go.jp/bosai/probability/data/probability/{area_code}.json"
-MDRR_BASE_URL    = "https://www.data.jma.go.jp/stats/data/mdrr"
+MDRR_BASE_URL       = "https://www.data.jma.go.jp/stats/data/mdrr"
+MDRR_RANKING_URL    = MDRR_BASE_URL + "/rank_daily/data{mmdd}.html"
+MDRR_RECORD_UPD_URL = MDRR_BASE_URL + "/rank_update/d{mmdd}.html"
 
 # 気象の状況 CSV エレメント定義
 # key → (表示名, CSVパス, 単位, ソート順)
@@ -309,6 +312,49 @@ async def list_tools() -> list[Tool]:
                 "required": ["element"],
             },
         ),
+        Tool(
+            name="get_daily_ranking",
+            description=(
+                "全国観測値ランキング（上位10地点）を取得する。"
+                "日最高気温・日最低気温・降水量・風速・積雪・降雪量を要素ごとにランキング表示。"
+                "今日から過去7日分を参照可能。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "description": "対象日付（MM/DD形式、例: '04/14'）。省略時は今日",
+                    },
+                    "element": {
+                        "type": "string",
+                        "description": (
+                            "取得する要素（省略時は全要素）。"
+                            "指定例: '最高気温', '最低気温', '降水量', '風速', '積雪', '降雪'"
+                        ),
+                    },
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_record_update",
+            description=(
+                "観測史上1位の値 更新状況を取得する。"
+                "その日に観測史上1位（タイ記録含む）を更新した地点・観測値・従来記録を表示。"
+                "今日から過去7日分を参照可能。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "description": "対象日付（MM/DD形式、例: '04/13'）。省略時は今日",
+                    },
+                },
+                "required": [],
+            },
+        ),
     ]
 
 
@@ -333,6 +379,13 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             arguments.get("prefecture", ""),
             int(arguments.get("top_n", 20)),
         )
+    elif name == "get_daily_ranking":
+        result = await _get_daily_ranking(
+            arguments.get("date", ""),
+            arguments.get("element", ""),
+        )
+    elif name == "get_record_update":
+        result = await _get_record_update(arguments.get("date", ""))
     else:
         result = f"エラー: 未知のツール '{name}'"
 
@@ -801,6 +854,194 @@ async def _get_mdrr_data(element: str, prefecture: str = "", top_n: int = 20) ->
     lines_out.append(f"\n表示: {total}件")
 
     return "\n".join(lines_out)
+
+
+def _parse_html_tables(html: str) -> list[dict]:
+    """HTML から <table> を解析して [{caption, rows}] のリストを返す。
+    閉じタグなしの <tr> にも対応するため、<tr> で分割してパースする。"""
+    result = []
+    for table_html in re.findall(r'<table[^>]*>(.*?)</table>', html, re.DOTALL | re.IGNORECASE):
+        cap_m = re.findall(r'<caption[^>]*>(.*?)</caption>', table_html, re.DOTALL | re.IGNORECASE)
+        caption = re.sub(r'<[^>]+>', '', cap_m[0]).strip() if cap_m else ""
+
+        # <tr> で分割（閉じタグがなくても対応）
+        rows = []
+        tr_blocks = re.split(r'<tr[^>]*>', table_html, flags=re.IGNORECASE)
+        for tr in tr_blocks[1:]:  # 最初のブロックは <tr> の前なのでスキップ
+            cells = re.findall(r'<t[dh][^>]*>(.*?)(?:</t[dh]>|(?=<t[dh][^>]*>)|(?=</tr>)|$)',
+                               tr, re.DOTALL | re.IGNORECASE)
+            clean = []
+            for c in cells:
+                text = re.sub(r'<[^>]+>', '', c).strip()
+                # 観測値末尾の "]" を除去（"30.3 ]"・"13:45]" → "30.3"・"13:45"）
+                # ただし "[タイ記録]" のような前置 "[" がある場合は除去しない
+                if not text.startswith('['):
+                    text = re.sub(r'\s*\]$', '', text)
+                if text:
+                    clean.append(text)
+            if clean:
+                rows.append(clean)
+
+        result.append({"caption": caption, "rows": rows})
+    return result
+
+
+def _mmdd_from_arg(date_str: str) -> str:
+    """'MM/DD' または 'MMDD' 形式の文字列を 'MMDD' に正規化。省略時は今日の JST 日付"""
+    if date_str:
+        normalized = date_str.replace("/", "").replace("-", "").strip()
+        if len(normalized) == 4:
+            return normalized
+    now = datetime.now(JST)
+    return now.strftime("%m%d")
+
+
+async def _get_daily_ranking(date_str: str = "", element_filter: str = "") -> str:
+    """全国観測値ランキング（上位10地点）を取得して整形する"""
+    mmdd = _mmdd_from_arg(date_str)
+    url = MDRR_RANKING_URL.format(mmdd=mmdd)
+
+    try:
+        response = requests.get(url, headers=HEADERS, timeout=30)
+        response.raise_for_status()
+        html = response.content.decode("utf-8", errors="replace")
+    except requests.exceptions.RequestException as e:
+        return f"エラー: データ取得に失敗しました。\n詳細: {e}"
+
+    # 日付ラベルを HTML から取得
+    date_label_m = re.search(r'<span id\s*=\s*["\']data_n["\'][^>]*>([^<]+)</span>', html)
+    date_label = date_label_m.group(1).strip() if date_label_m else f"{mmdd[:2]}月{mmdd[2:]}日"
+
+    time_label_m = re.search(r'<span[^>]*class=["\']ex2["\'][^>]*>([^<]+)</span>', html)
+    time_label = time_label_m.group(1).strip() if time_label_m else ""
+
+    tables = _parse_html_tables(html)
+
+    # 要素フィルタキーワードのマッピング
+    ELEMENT_KEYWORDS = {
+        "最高気温": ["最高気温"],
+        "最低気温": ["最低気温"],
+        "気温": ["気温"],
+        "降水量": ["降水量", "降水"],
+        "風速": ["風速"],
+        "積雪": ["積雪"],
+        "降雪": ["降雪量", "降雪"],
+    }
+
+    filter_keywords = []
+    for key, kws in ELEMENT_KEYWORDS.items():
+        if key in element_filter:
+            filter_keywords = kws
+            break
+
+    lines = [f"【全国観測値ランキング（{date_label}）{time_label}】", ""]
+
+    written = 0
+    for tbl in tables:
+        caption = tbl["caption"]
+        rows = tbl["rows"]
+        if not caption or len(rows) < 3:
+            continue
+
+        # 要素フィルタ
+        if filter_keywords and not any(kw in caption for kw in filter_keywords):
+            continue
+
+        lines.append(f"■ {caption}")
+
+        # ヘッダー行（1行目）
+        header = rows[0]
+        # データ行（2行目以降、ただし「単位行」は2行目の場合がある）
+        # 2行目が数値データでなければ単位行としてスキップ
+        data_start = 1
+        if len(rows) > 1:
+            second_row = rows[1]
+            # 数値が1つも含まれないなら単位行
+            if not any(re.match(r'^-?\d', c) for c in second_row):
+                data_start = 2
+
+        for row in rows[data_start:]:
+            if not row or not any(row):
+                continue
+            # 順位・地点・値の列を抽出（列数が多いので先頭数列のみ）
+            line_parts = []
+            for i, cell in enumerate(row[:7]):
+                if cell:
+                    line_parts.append(cell)
+            lines.append("  " + "  ".join(line_parts))
+
+        lines.append("")
+        written += 1
+
+    if written == 0:
+        lines.append("該当するランキングデータがありませんでした。")
+
+    return "\n".join(lines).rstrip()
+
+
+async def _get_record_update(date_str: str = "") -> str:
+    """観測史上1位の値 更新状況を取得して整形する"""
+    mmdd = _mmdd_from_arg(date_str)
+    url = MDRR_RECORD_UPD_URL.format(mmdd=mmdd)
+
+    try:
+        response = requests.get(url, headers=HEADERS, timeout=30)
+        response.raise_for_status()
+        html = response.content.decode("utf-8", errors="replace")
+    except requests.exceptions.RequestException as e:
+        return f"エラー: データ取得に失敗しました。\n詳細: {e}"
+
+    date_label = f"{mmdd[:2]}月{mmdd[2:]}日"
+
+    tables = _parse_html_tables(html)
+    lines = [f"【観測史上1位の値 更新状況（{date_label}）】", ""]
+
+    # サマリテーブル（地点数）を最初に表示
+    for tbl in tables:
+        if "地点数" in tbl["caption"] and "昨冬" not in tbl["caption"]:
+            lines.append("■ 更新地点数サマリ")
+            for row in tbl["rows"]:
+                if not row or not any(row):
+                    continue
+                lines.append("  " + " | ".join(c for c in row if c))
+            lines.append("")
+            break
+
+    # 更新があった要素テーブル（地点数 > 0）を表示
+    updated_count = 0
+    for tbl in tables:
+        caption = tbl["caption"]
+        rows = tbl["rows"]
+        # 地点数 > 0 のテーブルを対象とする
+        m = re.search(r'(\d+)地点', caption)
+        if not m or int(m.group(1)) == 0:
+            continue
+        if "地点数" in caption or "昨冬" in caption:
+            continue
+        if len(rows) < 2:
+            continue
+
+        lines.append(f"■ {caption}")
+
+        # 2行目以降をデータとして出力
+        data_start = 1
+        if len(rows) > 1:
+            if not any(re.match(r'^-?\d|^[^\d\s]{2,}', c) for c in rows[1]):
+                data_start = 2
+
+        for row in rows[data_start:]:
+            if not row or not any(row):
+                continue
+            parts = [c for c in row[:9] if c]
+            lines.append("  " + "  ".join(parts))
+
+        lines.append("")
+        updated_count += 1
+
+    if updated_count == 0:
+        lines.append("この日に観測史上1位を更新した地点はありませんでした。")
+
+    return "\n".join(lines).rstrip()
 
 
 async def _search_area(name: str) -> str:
