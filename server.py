@@ -36,6 +36,13 @@ MONTHLY_CSV_URL    = "https://www.data.jma.go.jp/risk/probability/guidance/downl
 # 季節予報解説資料（3ヶ月・6ヶ月）ページ ※ JavaScript SPA のため静的取得不可
 LONGFCST_KAISETSU_URL = "https://www.data.jma.go.jp/cpd/longfcst/kaisetsu/?term={term}"
 LONGFCST_TWOWEEK_PAGE = "https://www.data.jma.go.jp/cpd/twoweek/"
+# 早期天候情報ページ（JavaScript SPA）
+SOUTEN_URL = "https://www.data.jma.go.jp/cpd/souten/?reg_no={reg_no}&elem={elem}"
+SOUTEN_BASE_URL = "https://www.data.jma.go.jp/cpd/souten/"
+SOUTEN_DATA_URL = "https://www.data.jma.go.jp/cpd/souten/data/{reg_no}.json"
+SOUTEN_FLG_URL  = "https://www.data.jma.go.jp/cpd/souten/data/flg.json"
+# エルニーニョ監視速報ページ
+ELNINO_URL = "https://www.data.jma.go.jp/cpd/elnino/"
 
 # 気象の状況 CSV エレメント定義
 # key → (表示名, CSVパス, 単位, ソート順)
@@ -541,6 +548,43 @@ async def list_tools() -> list[Tool]:
                 "required": [],
             },
         ),
+        Tool(
+            name="get_early_weather_info",
+            description=(
+                "早期天候情報（2週間先の顕著な高温・低温・多雨・少雨・多雪の可能性）のURLと概要を取得する。"
+                "「2週間後に異常な高温になる？」「来週末は大雨になりそう？」などに使う。"
+                "毎週月曜・木曜に更新（顕著な天候が予想される場合のみ発表）。"
+                "region_num（地域番号）: 0=全国, 11=北海道地方, 15=東北地方, 20=関東甲信地方, "
+                "22=東海地方, 23=近畿地方, 26=中国地方, 29=四国地方, "
+                "30=九州北部地方, 31=九州南部・奄美地方, 34=沖縄地方。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "region_num": {
+                        "type": "string",
+                        "description": (
+                            "地域番号（11〜34）または地域名（例: '沖縄地方', '関東甲信地方'）。"
+                            "省略または '0' 指定で全国。"
+                        ),
+                    }
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_elnino_monitor",
+            description=(
+                "エルニーニョ監視速報のURLと概要を取得する。"
+                "エルニーニョ/ラニーニャ現象の現況・予測、熱帯太平洋の海面水温状況を確認できる。"
+                "毎月10日頃発表。日本の季節予報（高温・冷夏・暖冬等）に直結する情報。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        ),
     ]
 
 
@@ -590,6 +634,10 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         result = await _get_3month_forecast()
     elif name == "get_6month_forecast":
         result = await _get_6month_forecast()
+    elif name == "get_early_weather_info":
+        result = await _get_early_weather_info(arguments.get("region_num", "0"))
+    elif name == "get_elnino_monitor":
+        result = await _get_elnino_monitor()
     else:
         result = f"エラー: 未知のツール '{name}'"
 
@@ -649,6 +697,7 @@ async def _get_forecast(area_code: str) -> str:
             lines.append("")
 
     lines.append(f"出典: 気象庁 https://www.jma.go.jp/bosai/map.html#contents=forecast")
+    lines.append(f"地域別: https://www.jma.go.jp/bosai/forecast/#area_type=offices&area_code={area_code}")
     return "\n".join(lines).rstrip()
 
 
@@ -711,6 +760,7 @@ async def _get_weekly_forecast(area_code: str) -> str:
             lines.append("")
 
     lines.append(f"出典: 気象庁 https://www.jma.go.jp/bosai/map.html#contents=forecast")
+    lines.append(f"地域別: https://www.jma.go.jp/bosai/forecast/#area_type=offices&area_code={area_code}")
     return "\n".join(lines).rstrip()
 
 
@@ -744,6 +794,7 @@ async def _get_overview(area_code: str) -> str:
 
     lines.append("")
     lines.append(f"出典: 気象庁 https://www.jma.go.jp/bosai/map.html#contents=forecast")
+    lines.append(f"地域別: https://www.jma.go.jp/bosai/forecast/#area_type=offices&area_code={area_code}")
     return "\n".join(lines)
 
 
@@ -1524,7 +1575,9 @@ async def _get_twoweek_forecast(region_input: str = "20") -> str:
 
     out.append("")
     out.append("※ 平年差はアンサンブル予報の平均値（目安）、確率はP(平年以上/以下)")
-    out.append(f"詳細グラフ: {LONGFCST_TWOWEEK_PAGE}")
+    out.append(f"詳細グラフ（全国）: {LONGFCST_TWOWEEK_PAGE}")
+    out.append(f"詳細グラフ（地域別）: {LONGFCST_TWOWEEK_PAGE}?reg_no={region_num}")
+    out.append(f"早期天候情報: {SOUTEN_URL.format(reg_no=region_num, elem='temp')}")
     return "\n".join(out).rstrip()
 
 
@@ -1615,7 +1668,8 @@ async def _get_monthly_forecast(region_input: str = "20") -> str:
 
     out.append("")
     out.append("※ 平年差はアンサンブル予報の平均値（目安）、確率はP(平年以上/以下)")
-    out.append(f"詳細: https://www.data.jma.go.jp/cpd/longfcst/kaisetsu/?term=P1M")
+    out.append(f"詳細（全国）: https://www.data.jma.go.jp/cpd/longfcst/kaisetsu/?term=P1M")
+    out.append(f"早期天候情報（地域別）: {SOUTEN_URL.format(reg_no=region_num, elem='temp')}")
     return "\n".join(out).rstrip()
 
 
@@ -1707,6 +1761,145 @@ async def _get_6month_forecast() -> str:
         "",
         "※ 解説資料はJavaScriptで動的に描画されるため、",
         "  全文を読むにはブラウザでURLを開いてください。",
+    ]
+    return "\n".join(out)
+
+
+async def _get_early_weather_info(region_input: str = "0") -> str:
+    """早期天候情報の発表内容を取得して返す"""
+    # 地域番号を解決（0=全国）
+    if region_input in ("0", "全国", ""):
+        reg_no = 0
+        region_name = "全国"
+    else:
+        longfcst_num = _find_longfcst_region_num(region_input) or region_input
+        reg_no = int(longfcst_num)
+        region_name = LONGFCST_REGION_MAP.get(longfcst_num, region_input)
+
+    page_url = SOUTEN_URL.format(reg_no=reg_no, elem="temp")
+
+    # 全国指定の場合はflg.jsonで発表種別を確認してURL案内
+    if reg_no == 0:
+        flg = {}
+        try:
+            resp = requests.get(SOUTEN_FLG_URL, headers=HEADERS, timeout=15)
+            if resp.status_code == 200:
+                flg = resp.json()
+        except requests.exceptions.RequestException:
+            pass
+
+        out = [f"【早期天候情報 — 全国】", ""]
+        if flg.get("temp") == 1:
+            out.append("■ 現在発表中: 気温に関する早期天候情報（高温・低温）")
+        if flg.get("snow", -9) >= 0:
+            out.append("■ 現在発表中: 降雪量に関する早期天候情報")
+        if not (flg.get("temp") == 1 or flg.get("snow", -9) >= 0):
+            out.append("■ 現在、早期天候情報の発表はありません。")
+        out += [
+            "",
+            "地域を指定すると発表内容の詳細を確認できます。",
+            "例: 「九州北部地方の早期天候情報」",
+            "",
+            f"■ 全国マップURL",
+            f"  {SOUTEN_BASE_URL}",
+        ]
+        return "\n".join(out)
+
+    # 地域指定の場合はJSONデータを直接取得
+    data = []
+    try:
+        resp = requests.get(
+            SOUTEN_DATA_URL.format(reg_no=reg_no),
+            headers=HEADERS,
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+    except requests.exceptions.RequestException:
+        pass
+
+    out = [f"【早期天候情報 — {region_name}】", ""]
+
+    if not data:
+        out += [
+            "現在、この地域の早期天候情報の発表はありません。",
+            "",
+            "早期天候情報は2週間先に顕著な高温・低温・多雪などが予想される",
+            "場合にのみ発表されます（毎週月・木曜日）。",
+            "",
+            f"出典: {page_url}",
+        ]
+        return "\n".join(out)
+
+    # 発表あり: titleフィールドが存在するレコードが概要、type=="本文" が詳細テキスト
+    summary = [d for d in data if d.get("title") and d.get("type") != "本文"]
+    honbun  = [d for d in data if d.get("type") == "本文"]
+
+    # titleが存在しない場合は発表なし
+    if not summary and not honbun:
+        out += [
+            "現在、この地域の早期天候情報の発表はありません。",
+            "",
+            "早期天候情報は2週間先に顕著な高温・低温・多雪などが予想される",
+            "場合にのみ発表されます（毎週月・木曜日）。",
+            "",
+            f"出典: {page_url}",
+        ]
+        return "\n".join(out)
+
+    if summary:
+        s = summary[0]
+        out.append(f"■ タイトル: {s.get('title', '')}")
+        out.append(f"  発表: {s.get('reportDate_W', '')} {s.get('reportTime_W', '')}  {s.get('publishOffice', '')}")
+        out.append(f"  対象地域: {s.get('reg_ch_text', region_name)}")
+        out.append(f"  種別: {s.get('type', '')}")
+        out.append(f"  条件: {s.get('condition', '')}")
+
+    if honbun:
+        out.append("")
+        out.append("■ 本文")
+        out.append(honbun[0].get("text", "").strip())
+
+    out += [
+        "",
+        f"出典: {page_url}",
+    ]
+    return "\n".join(out)
+
+
+async def _get_elnino_monitor() -> str:
+    """エルニーニョ監視速報のURLと概要を返す"""
+    # ページ存在確認
+    page_ok = False
+    try:
+        resp = requests.get(ELNINO_URL, headers=HEADERS, timeout=15)
+        if resp.status_code == 200:
+            page_ok = True
+    except requests.exceptions.RequestException:
+        pass
+
+    status = "（ページ確認OK）" if page_ok else "（取得失敗）"
+    out = [
+        "【エルニーニョ監視速報】",
+        "",
+        "気象庁が毎月発表する「エルニーニョ監視速報」です。",
+        "太平洋赤道域の海面水温・大気循環の状況と、",
+        "エルニーニョ/ラニーニャ現象の監視・予測が掲載されます。",
+        "",
+        "■ 掲載内容",
+        "  ・エルニーニョ/ラニーニャ現象の現況と今後の見通し",
+        "  ・熱帯太平洋の海面水温平年差分布図",
+        "  ・各種気候指標の時系列グラフ",
+        "  ・アンサンブル予報モデルによる今後6ヶ月の予測",
+        "",
+        "■ 発表時期",
+        "  毎月10日頃（月1回）",
+        "",
+        f"■ URL {status}",
+        f"  {ELNINO_URL}",
+        "",
+        "※ エルニーニョ/ラニーニャは日本の季節予報（気温・降水量）に",
+        "  大きく影響するため、長期予報との併読を推奨します。",
     ]
     return "\n".join(out)
 
