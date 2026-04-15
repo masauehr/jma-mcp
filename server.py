@@ -30,6 +30,12 @@ INFORMATION_LIST_URL   = "https://www.jma.go.jp/bosai/information/data/informati
 INFORMATION_DENBUN_URL = "https://www.jma.go.jp/bosai/information/data/denbun/{json_name}.json"
 TYPHOON_LIST_URL       = "https://www.jma.go.jp/bosai/information/data/typhoon.json"
 TYPHOON_DENBUN_URL     = "https://www.jma.go.jp/bosai/information/data/typhoon/{json_name}"
+# 2週間気温予報・1ヶ月予報 確率予測CSVエンドポイント
+TWOWEEK_CSV_URL    = "https://www.data.jma.go.jp/risk/probability/guidance/download2w.php?2week_t_{num}.csv"
+MONTHLY_CSV_URL    = "https://www.data.jma.go.jp/risk/probability/guidance/download.php?month1_t_{num}.csv"
+# 季節予報解説資料（3ヶ月・6ヶ月）ページ ※ JavaScript SPA のため静的取得不可
+LONGFCST_KAISETSU_URL = "https://www.data.jma.go.jp/cpd/longfcst/kaisetsu/?term={term}"
+LONGFCST_TWOWEEK_PAGE = "https://www.data.jma.go.jp/cpd/twoweek/"
 
 # 気象の状況 CSV エレメント定義
 # key → (表示名, CSVパス, 単位, ソート順)
@@ -107,6 +113,46 @@ WARNING_CODE_MAP = {
 
 # 警報ステータスの優先度（表示順ソート用）
 WARNING_STATUS_ORDER = {"発表": 0, "継続": 1, "更新": 2, "解除": 3}
+
+# 2週間気温予報・1ヶ月予報 地域番号マップ
+# 出典: https://www.data.jma.go.jp/risk/probability/info/number.html
+LONGFCST_REGION_MAP = {
+    "11": "北海道地方",       "12": "北海道日本海側",       "13": "北海道オホーツク海側",
+    "14": "北海道太平洋側",   "15": "東北地方",             "16": "東北日本海側",
+    "17": "東北太平洋側",     "18": "東北北部",              "19": "東北南部",
+    "20": "関東甲信地方",     "21": "北陸地方",              "22": "東海地方",
+    "23": "近畿地方",         "24": "近畿日本海側",          "25": "近畿太平洋側",
+    "26": "中国地方",         "27": "山陰",                  "28": "山陽",
+    "29": "四国地方",         "30": "九州北部地方",          "31": "九州南部・奄美地方",
+    "32": "九州南部",         "33": "奄美地方",              "34": "沖縄地方",
+}
+
+# 気温平年差 → 定性カテゴリ変換（アンサンブル平均値を使用した近似）
+def _anomaly_to_category(anomaly: float) -> str:
+    """気温平年差（℃）をJMA定性カテゴリに変換"""
+    if anomaly >= 1.5:
+        return "かなり高い"
+    elif anomaly >= 0.5:
+        return "高い"
+    elif anomaly > -0.5:
+        return "平年並み"
+    elif anomaly > -1.5:
+        return "低い"
+    else:
+        return "かなり低い"
+
+
+def _find_longfcst_region_num(query: str) -> str | None:
+    """地域名の部分一致で2桁地域番号を返す"""
+    # 数字2桁そのものを指定された場合はそのまま返す
+    if query.isdigit() and len(query) == 2:
+        if query in LONGFCST_REGION_MAP:
+            return query
+    # 名前検索
+    for num, name in LONGFCST_REGION_MAP.items():
+        if query in name or name in query:
+            return num
+    return None
 
 # 警報・注意報エリアコード → 地域名（class10s / class15s）
 WARNING_AREA_NAME_MAP = {
@@ -418,6 +464,83 @@ async def list_tools() -> list[Tool]:
                 "required": [],
             },
         ),
+        Tool(
+            name="get_twoweek_forecast",
+            description=(
+                "2週間気温予報（8〜12日先の5日間平均気温）を地域別に取得する。"
+                "「来週末ごろの気温は？」「2週間後は高温になる？」など短期〜2週間先の気温傾向を確認できる。"
+                "region_num（地域番号）: 11=北海道地方, 15=東北地方, 20=関東甲信地方, "
+                "22=東海地方, 23=近畿地方, 26=中国地方, 29=四国地方, "
+                "30=九州北部地方, 31=九州南部・奄美地方, 34=沖縄地方。"
+                "毎日9時30分頃更新。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "region_num": {
+                        "type": "string",
+                        "description": (
+                            "地域番号（11〜34）または地域名（例: '沖縄地方', '関東甲信地方'）。"
+                            "省略時は関東甲信地方（20）。"
+                            "地域番号一覧: https://www.data.jma.go.jp/risk/probability/info/number.html"
+                        ),
+                    }
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_monthly_forecast",
+            description=(
+                "1ヶ月予報（向こう7日間・14日間・28日間の気温傾向）を地域別に取得する。"
+                "「今月の気温は平年より高い？」「来月にかけての気温の見通しは？」など確認できる。"
+                "region_num（地域番号）: 11=北海道地方, 15=東北地方, 20=関東甲信地方, "
+                "22=東海地方, 23=近畿地方, 26=中国地方, 29=四国地方, "
+                "30=九州北部地方, 31=九州南部・奄美地方, 34=沖縄地方。"
+                "毎週木曜日9時30分頃更新。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "region_num": {
+                        "type": "string",
+                        "description": (
+                            "地域番号（11〜34）または地域名（例: '沖縄地方', '関東甲信地方'）。"
+                            "省略時は関東甲信地方（20）。"
+                        ),
+                    }
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_3month_forecast",
+            description=(
+                "3ヶ月予報の解説資料URLと概要を取得する。"
+                "「夏の気温は？」「この先3ヶ月の降水量は？」など季節規模の見通しを知りたい場合に使う。"
+                "気温・降水量・日照時間の各地域別「高い/平年並み/低い」確率が掲載される。"
+                "毎月下旬発表（詳細な本文はブラウザでURL参照）。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_6month_forecast",
+            description=(
+                "暖候期予報・寒候期予報（6ヶ月見通し）の解説資料URLと概要を取得する。"
+                "「今年の夏（3〜8月）は暑い？」「この冬（9〜3月）の寒さは？」などの長期見通しに使う。"
+                "暖候期予報は2月下旬、寒候期予報は9月下旬に発表。"
+                "詳細な本文はブラウザでURL参照。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        ),
     ]
 
 
@@ -459,6 +582,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             area_code or "",
             arguments.get("info_type", ""),
         )
+    elif name == "get_twoweek_forecast":
+        result = await _get_twoweek_forecast(arguments.get("region_num", "20"))
+    elif name == "get_monthly_forecast":
+        result = await _get_monthly_forecast(arguments.get("region_num", "20"))
+    elif name == "get_3month_forecast":
+        result = await _get_3month_forecast()
+    elif name == "get_6month_forecast":
+        result = await _get_6month_forecast()
     else:
         result = f"エラー: 未知のツール '{name}'"
 
@@ -517,6 +648,7 @@ async def _get_forecast(area_code: str) -> str:
                     lines.append(f"  {date_str}: {temp}°C")
             lines.append("")
 
+    lines.append(f"出典: 気象庁 https://www.jma.go.jp/bosai/map.html#contents=forecast")
     return "\n".join(lines).rstrip()
 
 
@@ -578,6 +710,7 @@ async def _get_weekly_forecast(area_code: str) -> str:
                     lines.append(f"  {date_str}: {t_min}°C / {t_max}°C")
             lines.append("")
 
+    lines.append(f"出典: 気象庁 https://www.jma.go.jp/bosai/map.html#contents=forecast")
     return "\n".join(lines).rstrip()
 
 
@@ -609,6 +742,8 @@ async def _get_overview(area_code: str) -> str:
     else:
         lines.append("概況テキストがありません。")
 
+    lines.append("")
+    lines.append(f"出典: 気象庁 https://www.jma.go.jp/bosai/map.html#contents=forecast")
     return "\n".join(lines)
 
 
@@ -682,6 +817,8 @@ async def _get_warning(area_code: str) -> str:
     if not active_entries and not cleared_entries:
         lines.append("現在、発表中の警報・注意報はありません。")
 
+    lines.append("")
+    lines.append(f"出典: 気象庁 https://www.jma.go.jp/bosai/map.html#contents=warning&areaCode={area_code}")
     return "\n".join(lines).rstrip()
 
 
@@ -826,6 +963,8 @@ async def _get_early_warning(area_code: str) -> str:
     if len(lines) <= 4:
         lines.append("現在、警報級の可能性が高い・中程度の現象はありません。")
 
+    lines.append("")
+    lines.append(f"出典: 気象庁 https://www.jma.go.jp/bosai/map.html#contents=probability&areaCode={area_code}")
     return "\n".join(lines).rstrip()
 
 
@@ -926,6 +1065,7 @@ async def _get_mdrr_data(element: str, prefecture: str = "", top_n: int = 20) ->
     total = len(records)
     lines_out.append(f"\n表示: {total}件")
 
+    lines_out.append(f"\n出典: 気象庁 {MDRR_BASE_URL}/")
     return "\n".join(lines_out)
 
 
@@ -1047,6 +1187,8 @@ async def _get_daily_ranking(date_str: str = "", element_filter: str = "") -> st
     if written == 0:
         lines.append("該当するランキングデータがありませんでした。")
 
+    lines.append("")
+    lines.append(f"出典: 気象庁 {url}")
     return "\n".join(lines).rstrip()
 
 
@@ -1112,6 +1254,8 @@ async def _get_record_update(date_str: str = "") -> str:
     if updated_count == 0:
         lines.append("この日に観測史上1位を更新した地点はありませんでした。")
 
+    lines.append("")
+    lines.append(f"出典: 気象庁 {url}")
     return "\n".join(lines).rstrip()
 
 
@@ -1172,6 +1316,8 @@ async def _get_forecaster_comment(area_code: str) -> str:
         elif line:
             lines.append(f"  {line}")
 
+    lines.append("")
+    lines.append(f"出典: 気象庁 https://www.jma.go.jp/bosai/forecaster_comment/#areaCode={area_code}")
     return "\n".join(lines).rstrip()
 
 
@@ -1271,6 +1417,7 @@ async def _get_information(area_code: str = "", info_type: str = "") -> str:
 
         lines.append("")
 
+    lines.append(f"出典: 気象庁 https://www.jma.go.jp/bosai/information/")
     return "\n".join(lines).rstrip()
 
 
@@ -1286,6 +1433,282 @@ async def _search_area(name: str) -> str:
         lines.append(f"  {item['name']}: {item['code']}")
 
     return "\n".join(lines)
+
+
+async def _get_twoweek_forecast(region_input: str = "20") -> str:
+    """2週間気温予報CSVを取得して整形する"""
+    # 地域名 → 番号に変換
+    region_num = _find_longfcst_region_num(region_input) or region_input
+    if region_num not in LONGFCST_REGION_MAP:
+        valid = ", ".join(f"{k}={v}" for k, v in LONGFCST_REGION_MAP.items())
+        return f"エラー: 地域番号 '{region_input}' が不正です。\n有効な番号: {valid}"
+
+    region_name = LONGFCST_REGION_MAP[region_num]
+    url = TWOWEEK_CSV_URL.format(num=region_num)
+
+    try:
+        response = requests.get(url, headers=HEADERS, timeout=30)
+        response.raise_for_status()
+        text = response.content.decode("utf-8", errors="replace")
+    except requests.exceptions.RequestException as e:
+        return f"エラー: 2週間気温予報データの取得に失敗しました。\n詳細: {e}"
+
+    lines = text.strip().splitlines()
+    if len(lines) < 2:
+        return "エラー: CSVデータが空です。"
+
+    # ヘッダー行: 初期値年,月,日,[空白×8],{-10.0,…,+10.0}
+    header = lines[0].split(",")
+    try:
+        init_year = header[0].strip()
+        init_mon  = header[1].strip()
+        init_day  = header[2].strip()
+    except IndexError:
+        return "エラー: CSVフォーマットが予期した形式ではありません。"
+
+    out = [
+        f"【{region_name} 2週間気温予報】",
+        f"初期値日: {init_year}年{init_mon}月{init_day}日（毎日9:30頃更新）",
+        ""
+    ]
+
+    # ヘッダーから確率列の0°C列インデックスを計算
+    # 範囲は -10.0 to +10.0（0.1℃刻み、201値）、確率列は col[11] 開始
+    # 0°C = index 11 + 100 = 111
+    PROB_ZERO_IDX_2W = 111  # P(anomaly ≤ 0°C) の列インデックス（2週間CSV）
+
+    ELEM_NAMES = {"1": "日平均気温", "2": "日最高気温", "3": "日最低気温"}
+    prev_elem = None
+
+    for line in lines[1:]:
+        cols = line.split(",")
+        if len(cols) < 12:
+            continue
+        try:
+            sy, sm, sd = cols[0].strip(), cols[1].strip(), cols[2].strip()
+            ey, em, ed = cols[3].strip(), cols[4].strip(), cols[5].strip()
+            period    = int(cols[6].strip())
+            reg_code  = cols[7].strip()
+            elem      = cols[8].strip()
+            # col[10]: アンサンブル平均平年差（単位: 0.1℃）→ ÷10 で℃変換
+            mean_anom = int(cols[10].strip()) / 10.0
+        except (ValueError, IndexError):
+            continue
+
+        # 地点番号（5桁）はスキップ → 地域番号（2桁）のみ表示
+        if len(reg_code) > 2:
+            continue
+
+        # P(anomaly ≤ 0°C) を取得して高温/低温確率を計算
+        prob_below = None
+        if len(cols) > PROB_ZERO_IDX_2W:
+            try:
+                prob_below = int(cols[PROB_ZERO_IDX_2W].strip())
+            except (ValueError, IndexError):
+                pass
+        prob_above = (100 - prob_below) if prob_below is not None else None
+
+        if elem != prev_elem:
+            if prev_elem is not None:
+                out.append("")
+            out.append(f"■ {ELEM_NAMES.get(elem, f'要素{elem}')}")
+            prev_elem = elem
+
+        period_str = f"{int(sm)}/{int(sd)}〜{int(em)}/{int(ed)}（{period}日間平均）"
+        cat  = _anomaly_to_category(mean_anom)
+        sign = "+" if mean_anom >= 0 else ""
+        prob_str = ""
+        if prob_above is not None:
+            prob_str = f"  高い確率 {prob_above}% / 低い確率 {prob_below}%"
+        out.append(f"  {period_str}: 平年差 {sign}{mean_anom:.1f}℃ [{cat}]{prob_str}")
+
+    out.append("")
+    out.append("※ 平年差はアンサンブル予報の平均値（目安）、確率はP(平年以上/以下)")
+    out.append(f"詳細グラフ: {LONGFCST_TWOWEEK_PAGE}")
+    return "\n".join(out).rstrip()
+
+
+async def _get_monthly_forecast(region_input: str = "20") -> str:
+    """1ヶ月予報CSVを取得して整形する"""
+    region_num = _find_longfcst_region_num(region_input) or region_input
+    if region_num not in LONGFCST_REGION_MAP:
+        valid = ", ".join(f"{k}={v}" for k, v in LONGFCST_REGION_MAP.items())
+        return f"エラー: 地域番号 '{region_input}' が不正です。\n有効な番号: {valid}"
+
+    region_name = LONGFCST_REGION_MAP[region_num]
+    url = MONTHLY_CSV_URL.format(num=region_num)
+
+    try:
+        response = requests.get(url, headers=HEADERS, timeout=30)
+        response.raise_for_status()
+        text = response.content.decode("utf-8", errors="replace")
+    except requests.exceptions.RequestException as e:
+        return f"エラー: 1ヶ月予報データの取得に失敗しました。\n詳細: {e}"
+
+    lines = text.strip().splitlines()
+    if len(lines) < 2:
+        return "エラー: CSVデータが空です。"
+
+    # ヘッダー行: 初期値年,月,日,[空白×8],{-5.0,...,+5.0}
+    header = lines[0].split(",")
+    try:
+        init_year = header[0].strip()
+        init_mon  = header[1].strip()
+        init_day  = header[2].strip()
+    except IndexError:
+        return "エラー: CSVフォーマットが予期した形式ではありません。"
+
+    out = [
+        f"【{region_name} 1ヶ月予報】",
+        f"初期値日: {init_year}年{init_mon}月{init_day}日（毎週木曜9:30頃更新）",
+        ""
+    ]
+
+    # 1ヶ月CSV: 範囲 -5.0 to +5.0（0.1℃刻み、101値）
+    # 0°C は index 11 + 50 = 61
+    PROB_ZERO_IDX_1M = 61  # P(anomaly ≤ 0°C) の列インデックス（1ヶ月CSV）
+
+    ELEM_NAMES = {"1": "日平均気温", "2": "日最高気温", "3": "日最低気温"}
+    prev_elem = None
+
+    for line in lines[1:]:
+        cols = line.split(",")
+        if len(cols) < 12:
+            continue
+        try:
+            sy, sm, sd = cols[0].strip(), cols[1].strip(), cols[2].strip()
+            ey, em, ed = cols[3].strip(), cols[4].strip(), cols[5].strip()
+            period    = int(cols[6].strip())
+            reg_code  = cols[7].strip()
+            elem      = cols[8].strip()
+            # col[10]: アンサンブル平均平年差（単位: 0.1℃）→ ÷10 で℃変換
+            mean_anom = int(cols[10].strip()) / 10.0
+        except (ValueError, IndexError):
+            continue
+
+        # 地点番号（5桁）はスキップ
+        if len(reg_code) > 2:
+            continue
+
+        # P(anomaly ≤ 0°C) を取得して確率を計算
+        prob_below = None
+        if len(cols) > PROB_ZERO_IDX_1M:
+            try:
+                prob_below = int(cols[PROB_ZERO_IDX_1M].strip())
+            except (ValueError, IndexError):
+                pass
+        prob_above = (100 - prob_below) if prob_below is not None else None
+
+        if elem != prev_elem:
+            if prev_elem is not None:
+                out.append("")
+            out.append(f"■ {ELEM_NAMES.get(elem, f'要素{elem}')}")
+            prev_elem = elem
+
+        period_str = f"{int(sm)}/{int(sd)}〜{int(em)}/{int(ed)}（{period}日間平均）"
+        cat  = _anomaly_to_category(mean_anom)
+        sign = "+" if mean_anom >= 0 else ""
+        prob_str = ""
+        if prob_above is not None:
+            prob_str = f"  高い確率 {prob_above}% / 低い確率 {prob_below}%"
+        out.append(f"  {period_str}: 平年差 {sign}{mean_anom:.1f}℃ [{cat}]{prob_str}")
+
+    out.append("")
+    out.append("※ 平年差はアンサンブル予報の平均値（目安）、確率はP(平年以上/以下)")
+    out.append(f"詳細: https://www.data.jma.go.jp/cpd/longfcst/kaisetsu/?term=P1M")
+    return "\n".join(out).rstrip()
+
+
+async def _get_3month_forecast() -> str:
+    """3ヶ月予報の解説資料URLと概要を返す"""
+    url = LONGFCST_KAISETSU_URL.format(term="P3M")
+
+    # ページ存在確認
+    page_ok = False
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=15)
+        if resp.status_code == 200:
+            page_ok = True
+    except requests.exceptions.RequestException:
+        pass
+
+    status = "（ページ確認OK）" if page_ok else "（取得失敗）"
+    out = [
+        "【3ヶ月予報 解説資料】",
+        "",
+        "気象庁が毎月下旬に発表する「3ヶ月予報」です。",
+        "向こう3ヶ月間の気温・降水量・日照時間について、",
+        "各地域別に「高い/平年並み/低い」の確率が掲載されます。",
+        "",
+        "■ 掲載内容",
+        "  ・気温の見通し（各地方・地域別）",
+        "  ・降水量の見通し（各地方・地域別）",
+        "  ・日照時間の見通し（各地方・地域別）",
+        "  ・確率表（高い/平年並み/低い）",
+        "  ・特徴的な天候の解説文",
+        "",
+        "■ 発表時期",
+        "  毎月下旬（木曜日）に更新",
+        "",
+        f"■ 解説資料URL {status}",
+        f"  {url}",
+        "",
+        "※ 解説資料はJavaScriptで動的に描画されるため、",
+        "  全文を読むにはブラウザでURLを開いてください。",
+    ]
+    return "\n".join(out)
+
+
+async def _get_6month_forecast() -> str:
+    """暖候期予報・寒候期予報（6ヶ月見通し）の解説資料URLと概要を返す"""
+    url = LONGFCST_KAISETSU_URL.format(term="P6M")
+
+    # ページ存在確認
+    page_ok = False
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=15)
+        if resp.status_code == 200:
+            page_ok = True
+    except requests.exceptions.RequestException:
+        pass
+
+    now_jst = datetime.now(JST)
+    month = now_jst.month
+    # 暖候期（3〜8月）は2月下旬発表、寒候期（9〜3月）は9月下旬発表
+    if 3 <= month <= 8:
+        season_type = "暖候期（3〜8月）"
+        publish_info = "2月下旬発表"
+    else:
+        season_type = "寒候期（9〜翌3月）"
+        publish_info = "9月下旬発表"
+
+    status = "（ページ確認OK）" if page_ok else "（取得失敗）"
+    out = [
+        "【暖候期予報・寒候期予報（6ヶ月見通し）】",
+        "",
+        f"現在の対象シーズン: {season_type}（{publish_info}）",
+        "",
+        "気象庁が年2回（2月下旬・9月下旬）発表する「6ヶ月見通し」です。",
+        "半年先までの気温・降水量・日照時間の傾向が掲載されます。",
+        "",
+        "■ 掲載内容",
+        "  ・気温の見通し（各地方・地域別）",
+        "  ・降水量の見通し（各地方・地域別）",
+        "  ・日照時間の見通し（各地方・地域別）",
+        "  ・エルニーニョ/ラニーニャの影響評価",
+        "  ・特徴的な天候の解説文",
+        "",
+        "■ 発表時期",
+        "  ・暖候期予報: 毎年2月下旬（対象期間3〜8月）",
+        "  ・寒候期予報: 毎年9月下旬（対象期間9〜翌3月）",
+        "",
+        f"■ 解説資料URL {status}",
+        f"  {url}",
+        "",
+        "※ 解説資料はJavaScriptで動的に描画されるため、",
+        "  全文を読むにはブラウザでURLを開いてください。",
+    ]
+    return "\n".join(out)
 
 
 async def main():

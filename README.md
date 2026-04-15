@@ -123,9 +123,13 @@ Claude Code（結果を受け取り、回答に組み込む）
 | `/bosai/forecast/data/overview_forecast/{code}.json` | 天気概況テキスト | `get_overview` |
 | `/bosai/warning/data/warning/{code}.json` | 警報・注意報発表状況 | `get_warning` |
 | `/bosai/probability/data/probability/{code}.json` | 早期注意情報（警報級の可能性） | `get_early_warning` |
+| `/bosai/information/data/information.json` | 気象情報一覧（府県・地方・全般） | `get_information` |
+| `/bosai/information/data/denbun/{json_name}.json` | 気象情報本文（見出し＋解説文） | `get_information`（内部利用） |
 | `data.jma.go.jp /stats/data/mdrr/{category}/alltable/{elem}_rct.csv` | 最新観測値（降水量・気温・風速・積雪 等） | `get_mdrr_data` |
 | `data.jma.go.jp /stats/data/mdrr/rank_daily/data{MMDD}.html` | 全国観測値ランキング（上位10地点） | `get_daily_ranking` |
 | `data.jma.go.jp /stats/data/mdrr/rank_update/d{MMDD}.html` | 観測史上1位の値 更新状況 | `get_record_update` |
+| `data.jma.go.jp /risk/probability/guidance/download2w.php?2week_t_{num}.csv` | 2週間気温予報（確率CSV） | `get_twoweek_forecast` |
+| `data.jma.go.jp /risk/probability/guidance/download.php?month1_t_{num}.csv` | 1ヶ月予報（確率CSV） | `get_monthly_forecast` |
 
 ### JSONデータの変換処理
 
@@ -164,6 +168,8 @@ Claude Code（結果を受け取り、回答に組み込む）
 | `get_overview` | 天気概況テキストを取得 | `area_code` |
 | `get_warning` | 警報・注意報の発表状況を取得 | `area_code` |
 | `get_early_warning` | 早期注意情報（警報級の可能性）と気象台コメントを取得 | `area_code` |
+| `get_forecaster_comment` | 気象台からのコメント（警報等の見込み・特記事項）を取得 | `area_code` |
+| `get_information` | 気象情報（府県・地方・全般）の見出し＋本文を取得 | `area_code`（省略可）, `info_type`（省略可） |
 
 ### 気象の状況・観測値系（全国データ）
 
@@ -172,6 +178,28 @@ Claude Code（結果を受け取り、回答に組み込む）
 | `get_mdrr_data` | 全国観測所の最新値を取得（降水量・気温・風速・積雪 等 20種） | `element`（必須）, `prefecture`（都道府県フィルタ）, `top_n`（件数） |
 | `get_daily_ranking` | 全国観測値ランキング（上位10地点）を取得 | `date`（MM/DD、省略=今日）, `element`（要素フィルタ） |
 | `get_record_update` | 観測史上1位の値 更新状況を取得 | `date`（MM/DD、省略=今日） |
+
+### 長期予報系
+
+| ツール名 | 説明 | 引数 |
+|---|---|---|
+| `get_twoweek_forecast` | 2週間気温予報（5日間平均・確率付き）を地域別に取得 | `region_num`（地域番号11〜34、省略=関東甲信） |
+| `get_monthly_forecast` | 1ヶ月予報（7/14/28日間平均・確率付き）を地域別に取得 | `region_num`（地域番号11〜34、省略=関東甲信） |
+| `get_3month_forecast` | 3ヶ月予報の解説資料URL・掲載内容の概要を取得 | なし |
+| `get_6month_forecast` | 暖候期・寒候期予報（6ヶ月見通し）の解説資料URL・概要を取得 | なし |
+
+#### `get_twoweek_forecast` / `get_monthly_forecast` の地域番号
+
+| 番号 | 地域名 | 番号 | 地域名 |
+|---|---|---|---|
+| 11 | 北海道地方 | 23 | 近畿地方 |
+| 15 | 東北地方 | 26 | 中国地方 |
+| 20 | 関東甲信地方 | 29 | 四国地方 |
+| 21 | 北陸地方 | 30 | 九州北部地方 |
+| 22 | 東海地方 | 31 | 九州南部・奄美地方 |
+| — | — | 34 | 沖縄地方 |
+
+> 地域番号の完全一覧: https://www.data.jma.go.jp/risk/probability/info/number.html
 
 #### `get_mdrr_data` の element キー一覧
 
