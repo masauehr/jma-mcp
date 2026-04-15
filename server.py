@@ -26,6 +26,10 @@ MDRR_BASE_URL       = "https://www.data.jma.go.jp/stats/data/mdrr"
 MDRR_RANKING_URL    = MDRR_BASE_URL + "/rank_daily/data{mmdd}.html"
 MDRR_RECORD_UPD_URL = MDRR_BASE_URL + "/rank_update/d{mmdd}.html"
 FORECASTER_COMMENT_URL = "https://www.jma.go.jp/bosai/forecaster_comment/data/comments/{area_code}.txt"
+INFORMATION_LIST_URL   = "https://www.jma.go.jp/bosai/information/data/information.json"
+INFORMATION_DENBUN_URL = "https://www.jma.go.jp/bosai/information/data/denbun/{json_name}.json"
+TYPHOON_LIST_URL       = "https://www.jma.go.jp/bosai/information/data/typhoon.json"
+TYPHOON_DENBUN_URL     = "https://www.jma.go.jp/bosai/information/data/typhoon/{json_name}"
 
 # 気象の状況 CSV エレメント定義
 # key → (表示名, CSVパス, 単位, ソート順)
@@ -388,6 +392,32 @@ async def list_tools() -> list[Tool]:
                 "required": ["area_code"],
             },
         ),
+        Tool(
+            name="get_information",
+            description=(
+                "気象情報（府県気象情報・地方気象情報・全般気象情報など）の発表内容を取得する。"
+                "大雨・暴風・高波・台風など気象現象に関する詳細な解説文（見出し＋本文）を確認できる。"
+                "area_code を指定すると該当都道府県の情報に絞り込む。省略時は全国の最新情報を表示。"
+                "info_type で「府県気象情報」「地方気象情報」「全般気象情報」等に絞り込み可能。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "area_code": {
+                        "anyOf": [{"type": "string"}, {"type": "integer"}],
+                        "description": "気象庁エリアコード（例: 471000 = 沖縄本島地方、400000 = 福岡県）。省略時は全国",
+                    },
+                    "info_type": {
+                        "type": "string",
+                        "description": (
+                            "情報種別でフィルタ（部分一致）。"
+                            "例: '府県気象情報', '地方気象情報', '全般気象情報', '潮位情報', '天候情報'"
+                        ),
+                    },
+                },
+                "required": [],
+            },
+        ),
     ]
 
 
@@ -424,6 +454,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         result = await _get_record_update(arguments.get("date", ""))
     elif name == "get_forecaster_comment":
         result = await _get_forecaster_comment(area_code)
+    elif name == "get_information":
+        result = await _get_information(
+            area_code or "",
+            arguments.get("info_type", ""),
+        )
     else:
         result = f"エラー: 未知のツール '{name}'"
 
@@ -1136,6 +1171,105 @@ async def _get_forecaster_comment(area_code: str) -> str:
             lines.append(f"  {line}")
         elif line:
             lines.append(f"  {line}")
+
+    return "\n".join(lines).rstrip()
+
+
+async def _get_information(area_code: str = "", info_type: str = "") -> str:
+    """気象情報（府県気象情報・地方気象情報・全般気象情報等）を取得して整形する"""
+    try:
+        items = fetch_json(INFORMATION_LIST_URL)
+    except requests.exceptions.RequestException as e:
+        return f"エラー: 気象情報一覧の取得に失敗しました。\n詳細: {e}"
+
+    if not items:
+        return "エラー: 気象情報データが空です。"
+
+    # 台風全般情報は typhoon.json から別途取得してマージ
+    try:
+        typhoon_items = fetch_json(TYPHOON_LIST_URL)
+        for item in typhoon_items:
+            item["_typhoon"] = True  # 本文取得エンドポイント区別用
+        items = items + typhoon_items
+    except requests.exceptions.RequestException:
+        pass  # 台風情報取得失敗は無視して続行
+
+    # エリアコードフィルタ: areaCode（都道府県レベル）で前方一致
+    # 例: area_code="471000" → areaCode="471000" に一致
+    # area_code が指定されない場合は全件対象
+    if area_code:
+        # 上位コード（例: 47xxxx → 470000）でも一致させるため
+        # items の areaCodes リスト内に area_code が含まれるものを選択
+        filtered = [
+            d for d in items
+            if area_code in d.get("areaCodes", []) or d.get("areaCode") == area_code
+        ]
+        # 一致しない場合は都道府県コード先頭2桁で緩やかにマッチ
+        if not filtered:
+            prefix = area_code[:2]
+            filtered = [
+                d for d in items
+                if any(c.startswith(prefix) for c in d.get("areaCodes", []))
+            ]
+    else:
+        filtered = items
+
+    # 情報種別フィルタ（部分一致）
+    if info_type:
+        filtered = [d for d in filtered if info_type in d.get("controlTitle", "")]
+
+    if not filtered:
+        area_label = AREA_CODE_MAP.get(area_code, area_code) if area_code else "全国"
+        type_label = f"（種別: {info_type}）" if info_type else ""
+        return f"現在、{area_label}の気象情報{type_label}は発表されていません。"
+
+    # 発表日時の新しい順にソート
+    filtered.sort(key=lambda d: d.get("reportDatetime", ""), reverse=True)
+
+    # 本文取得は上位5件まで
+    MAX_FULL_TEXT = 5
+    area_label = AREA_CODE_MAP.get(area_code, area_code) if area_code else "全国"
+    lines = [f"【{area_label} 気象情報】", f"該当件数: {len(filtered)}件", ""]
+
+    for i, item in enumerate(filtered):
+        control_title   = item.get("controlTitle", "")
+        head_title      = item.get("headTitle", "")
+        publishing      = item.get("publishingOffice", "")
+        report_dt       = item.get("reportDatetime", "")
+        info_type_label = item.get("infoType", "")
+        # typhoon.json 由来は fileName フィールド、それ以外は jsonName フィールド
+        is_typhoon = item.get("_typhoon", False)
+        if is_typhoon:
+            json_name = item.get("fileName", "")
+        else:
+            json_name = item.get("jsonName", "")
+
+        date_str = format_date_jp(report_dt) if report_dt else ""
+
+        lines.append(f"■ {control_title}（{publishing}）")
+        lines.append(f"  発表: {date_str}　{info_type_label}")
+        lines.append(f"  見出し: {head_title}")
+
+        # 本文取得（上位 MAX_FULL_TEXT 件のみ）
+        if i < MAX_FULL_TEXT and json_name:
+            if is_typhoon:
+                denbun_url = TYPHOON_DENBUN_URL.format(json_name=json_name)
+            else:
+                denbun_url = INFORMATION_DENBUN_URL.format(json_name=json_name)
+            try:
+                denbun = fetch_json(denbun_url)
+                headline = denbun.get("headlineText", "").strip()
+                comment  = denbun.get("commentText", "").strip()
+                if headline:
+                    lines.append(f"  概要: {headline}")
+                if comment:
+                    # 長い本文は改行を保持しつつ先頭に空白を付けて整形
+                    for cline in comment.splitlines():
+                        lines.append(f"    {cline}" if cline.strip() else "")
+            except requests.exceptions.RequestException:
+                pass  # 本文取得失敗は無視して続行
+
+        lines.append("")
 
     return "\n".join(lines).rstrip()
 
