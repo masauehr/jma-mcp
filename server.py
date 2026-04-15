@@ -25,6 +25,7 @@ PROBABILITY_URL  = "https://www.jma.go.jp/bosai/probability/data/probability/{ar
 MDRR_BASE_URL       = "https://www.data.jma.go.jp/stats/data/mdrr"
 MDRR_RANKING_URL    = MDRR_BASE_URL + "/rank_daily/data{mmdd}.html"
 MDRR_RECORD_UPD_URL = MDRR_BASE_URL + "/rank_update/d{mmdd}.html"
+FORECASTER_COMMENT_URL = "https://www.jma.go.jp/bosai/forecaster_comment/data/comments/{area_code}.txt"
 
 # 気象の状況 CSV エレメント定義
 # key → (表示名, CSVパス, 単位, ソート順)
@@ -202,8 +203,8 @@ async def list_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "area_code": {
-                        "type": "string",
-                        "description": "気象庁エリアコード（例: '471000' = 沖縄本島地方）",
+                        "anyOf": [{"type": "string"}, {"type": "integer"}],
+                        "description": "気象庁エリアコード（例: 471000 = 沖縄本島地方）",
                     }
                 },
                 "required": ["area_code"],
@@ -216,8 +217,8 @@ async def list_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "area_code": {
-                        "type": "string",
-                        "description": "気象庁エリアコード（例: '471000' = 沖縄本島地方）",
+                        "anyOf": [{"type": "string"}, {"type": "integer"}],
+                        "description": "気象庁エリアコード（例: 471000 = 沖縄本島地方）",
                     }
                 },
                 "required": ["area_code"],
@@ -230,8 +231,8 @@ async def list_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "area_code": {
-                        "type": "string",
-                        "description": "気象庁エリアコード（例: '471000' = 沖縄本島地方）",
+                        "anyOf": [{"type": "string"}, {"type": "integer"}],
+                        "description": "気象庁エリアコード（例: 471000 = 沖縄本島地方）",
                     }
                 },
                 "required": ["area_code"],
@@ -258,8 +259,8 @@ async def list_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "area_code": {
-                        "type": "string",
-                        "description": "気象庁エリアコード（例: '471000' = 沖縄本島地方）",
+                        "anyOf": [{"type": "string"}, {"type": "integer"}],
+                        "description": "気象庁エリアコード（例: 471000 = 沖縄本島地方）",
                     }
                 },
                 "required": ["area_code"],
@@ -272,8 +273,8 @@ async def list_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "area_code": {
-                        "type": "string",
-                        "description": "気象庁エリアコード（例: '471000' = 沖縄本島地方）",
+                        "anyOf": [{"type": "string"}, {"type": "integer"}],
+                        "description": "気象庁エリアコード（例: 471000 = 沖縄本島地方）",
                     }
                 },
                 "required": ["area_code"],
@@ -282,16 +283,14 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="get_mdrr_data",
             description=(
-                "気象庁「最新の気象データ（気象の状況）」から全国観測所の最新値を取得する。"
-                "降水量・風速・気温・積雪・降雪量などを都道府県フィルタや上位N件で絞り込める。"
-                "element に指定できる値: "
-                "pre1h(1時間降水量), pre3h(3時間), pre6h(6時間), pre12h(12時間), "
-                "pre24h(24時間), pre48h(48時間), pre72h(72時間), predaily(日降水量), "
-                "mxwsp(最大風速), gust(最大瞬間風速), "
-                "mxtem(最高気温), mntem(最低気温), "
-                "snc(現在の積雪), mxsnc(最深積雪), "
-                "snd3h(3時間降雪量), snd6h(6時間), snd12h(12時間), "
-                "snd24h(24時間), snd48h(48時間), snd72h(72時間)"
+                "特定の都道府県や地域の気象観測値を取得する。"
+                "「沖縄の最高気温」「北海道の降雪量」のように地域を絞って調べるときに使う。"
+                "element(必須): mxtem=最高気温, mntem=最低気温, pre24h=日降水量, "
+                "mxwsp=最大風速, gust=最大瞬間風速, snc=積雪, "
+                "pre1h/pre3h/pre6h/pre12h/pre48h/pre72h=降水量, predaily=日降水量, "
+                "mxsnc=最深積雪, snd3h/snd6h/snd12h/snd24h/snd48h/snd72h=降雪量。"
+                "prefecture: 都道府県名（例: '沖縄', '北海道'）で絞り込み。"
+                "top_n: 上位N件（デフォルト20）。"
             ),
             inputSchema={
                 "type": "object",
@@ -315,8 +314,9 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="get_daily_ranking",
             description=(
-                "全国観測値ランキング（上位10地点）を取得する。"
-                "日最高気温・日最低気温・降水量・風速・積雪・降雪量を要素ごとにランキング表示。"
+                "全国の観測値ランキング上位5地点を取得する。"
+                "「全国で一番暑い場所」「全国の最高気温ランキング」など全国比較に使う。"
+                "特定の都道府県を調べるなら get_mdrr_data を使うこと。"
                 "今日から過去7日分を参照可能。"
             ),
             inputSchema={
@@ -355,24 +355,46 @@ async def list_tools() -> list[Tool]:
                 "required": [],
             },
         ),
+        Tool(
+            name="get_forecaster_comment",
+            description=(
+                "気象台からのコメントを取得する。"
+                "「<<警報等の見込み>>」と「<<特記事項>>」を含む予報官コメント。"
+                "台風・大雨・うねりなど特別な現象への注意喚起が記載される。"
+                "天気予報・警報だけでは分からない気象台の総合的な見解を確認できる。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "area_code": {
+                        "anyOf": [{"type": "string"}, {"type": "integer"}],
+                        "description": "気象庁エリアコード（例: 471000 = 沖縄本島地方）",
+                    }
+                },
+                "required": ["area_code"],
+            },
+        ),
     ]
 
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     """ツール呼び出しのディスパッチャー"""
+    # ローカルLLMが整数で渡すケースに対応するため str() で正規化
+    area_code = str(arguments["area_code"]) if "area_code" in arguments else None
+
     if name == "get_forecast":
-        result = await _get_forecast(arguments["area_code"])
+        result = await _get_forecast(area_code)
     elif name == "get_weekly_forecast":
-        result = await _get_weekly_forecast(arguments["area_code"])
+        result = await _get_weekly_forecast(area_code)
     elif name == "get_overview":
-        result = await _get_overview(arguments["area_code"])
+        result = await _get_overview(area_code)
     elif name == "search_area":
         result = await _search_area(arguments["name"])
     elif name == "get_warning":
-        result = await _get_warning(arguments["area_code"])
+        result = await _get_warning(area_code)
     elif name == "get_early_warning":
-        result = await _get_early_warning(arguments["area_code"])
+        result = await _get_early_warning(area_code)
     elif name == "get_mdrr_data":
         result = await _get_mdrr_data(
             arguments["element"],
@@ -386,6 +408,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         )
     elif name == "get_record_update":
         result = await _get_record_update(arguments.get("date", ""))
+    elif name == "get_forecaster_comment":
+        result = await _get_forecaster_comment(area_code)
     else:
         result = f"エラー: 未知のツール '{name}'"
 
@@ -960,14 +984,12 @@ async def _get_daily_ranking(date_str: str = "", element_filter: str = "") -> st
             if not any(re.match(r'^-?\d', c) for c in second_row):
                 data_start = 2
 
-        for row in rows[data_start:]:
+        # 上位5件に絞る（コンテキスト節約のため）
+        for row in rows[data_start:data_start + 5]:
             if not row or not any(row):
                 continue
-            # 順位・地点・値の列を抽出（列数が多いので先頭数列のみ）
-            line_parts = []
-            for i, cell in enumerate(row[:7]):
-                if cell:
-                    line_parts.append(cell)
+            # 順位・都道府県・地点・値の列のみ抽出
+            line_parts = [c for c in row[:6] if c]
             lines.append("  " + "  ".join(line_parts))
 
         lines.append("")
@@ -1040,6 +1062,66 @@ async def _get_record_update(date_str: str = "") -> str:
 
     if updated_count == 0:
         lines.append("この日に観測史上1位を更新した地点はありませんでした。")
+
+    return "\n".join(lines).rstrip()
+
+
+async def _get_forecaster_comment(area_code: str) -> str:
+    """気象台からのコメント（警報等の見込み・特記事項）を取得して整形する"""
+    area_name = AREA_CODE_MAP.get(area_code, area_code)
+    url = FORECASTER_COMMENT_URL.format(area_code=area_code)
+
+    try:
+        response = requests.get(url, headers=HEADERS, timeout=30)
+        response.encoding = "utf-8"
+        response.raise_for_status()
+        html = response.text
+    except requests.exceptions.RequestException as e:
+        return f"エラー: 気象台コメントの取得に失敗しました。\n詳細: {e}"
+
+    # 発表時刻を抽出
+    pub_date = ""
+    m = re.search(r'class="ycomment_pub_date"[^>]*>([^<]+)<', html)
+    if m:
+        pub_date = m.group(1).strip()
+
+    # <p> を段落区切り、<br> を改行に変換してからタグ除去
+    text = re.sub(r'</p>', '\n\n', html, flags=re.IGNORECASE)
+    text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+    # リンク（<a>〜</a>）は丸ごと除去
+    text = re.sub(r'<a [^>]+>.*?</a>', '', text, flags=re.DOTALL)
+    text = re.sub(r'<[^>]+>', '', text)
+    text = text.replace('&nbsp;', ' ').replace('&lt;', '<').replace('&gt;', '>').replace('&amp;', '&')
+    # 矢印記号（リンク前後の装飾）を除去
+    text = re.sub(r'[→←▶]', '', text)
+    # 「背景色の説明」以降は不要なので除去
+    text = re.sub(r'背景色の説明.*', '', text, flags=re.DOTALL)
+
+    lines_raw = [l.strip() for l in text.splitlines() if l.strip()]
+
+    lines = [f"【{area_name} 気象台からのコメント】", ""]
+    if pub_date:
+        lines.append(f"発表: {pub_date}")
+        lines.append("")
+
+    # 不要行のフィルタキーワード
+    SKIP_KEYWORDS = ['で詳細を確認', '★', '警報・注意報のページ']
+
+    for line in lines_raw:
+        # 発表時刻の重複行はスキップ
+        if pub_date and line == pub_date:
+            continue
+        # リンク残骸などの不要行はスキップ
+        if any(kw in line for kw in SKIP_KEYWORDS):
+            continue
+        # セクションヘッダーを強調
+        if '＜＜' in line and '＞＞' in line:
+            lines.append("")
+            lines.append(f"■ {line.strip()}")
+        elif line.startswith('・'):
+            lines.append(f"  {line}")
+        elif line:
+            lines.append(f"  {line}")
 
     return "\n".join(lines).rstrip()
 
