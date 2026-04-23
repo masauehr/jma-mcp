@@ -30,6 +30,8 @@ INFORMATION_LIST_URL   = "https://www.jma.go.jp/bosai/information/data/informati
 INFORMATION_DENBUN_URL = "https://www.jma.go.jp/bosai/information/data/denbun/{json_name}.json"
 TYPHOON_LIST_URL       = "https://www.jma.go.jp/bosai/information/data/typhoon.json"
 TYPHOON_DENBUN_URL     = "https://www.jma.go.jp/bosai/information/data/typhoon/{json_name}"
+QUAKE_LIST_URL         = "https://www.jma.go.jp/bosai/quake/data/list.json"
+TSUNAMI_LIST_URL       = "https://www.jma.go.jp/bosai/tsunami/data/list.json"
 # 2週間気温予報・1ヶ月予報 確率予測CSVエンドポイント
 TWOWEEK_CSV_URL    = "https://www.data.jma.go.jp/risk/probability/guidance/download2w.php?2week_t_{num}.csv"
 MONTHLY_CSV_URL    = "https://www.data.jma.go.jp/risk/probability/guidance/download.php?month1_t_{num}.csv"
@@ -585,6 +587,42 @@ async def list_tools() -> list[Tool]:
                 "required": [],
             },
         ),
+        Tool(
+            name="get_earthquake_info",
+            description=(
+                "最近の地震情報を取得する。"
+                "震央地名・規模（マグニチュード）・最大震度・発生日時を一覧表示する。"
+                "min_intensity を指定すると指定震度以上の地震に絞り込める。"
+                "count で取得件数を指定（デフォルト10、最大50）。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "min_intensity": {
+                        "type": "integer",
+                        "description": "最小震度（1〜7）。省略時は全件表示",
+                    },
+                    "count": {
+                        "type": "integer",
+                        "description": "取得件数（デフォルト10、最大50）",
+                    },
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_tsunami_info",
+            description=(
+                "最近の津波情報・津波予報を取得する。"
+                "発表中の津波警報・注意報・予報の一覧と対象地域を表示する。"
+                "現在発表中の津波情報がない場合はその旨を返す。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        ),
     ]
 
 
@@ -638,6 +676,13 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         result = await _get_early_weather_info(arguments.get("region_num", "0"))
     elif name == "get_elnino_monitor":
         result = await _get_elnino_monitor()
+    elif name == "get_earthquake_info":
+        result = await _get_earthquake_info(
+            int(arguments.get("min_intensity", 0)),
+            int(arguments.get("count", 10)),
+        )
+    elif name == "get_tsunami_info":
+        result = await _get_tsunami_info()
     else:
         result = f"エラー: 未知のツール '{name}'"
 
@@ -1902,6 +1947,98 @@ async def _get_elnino_monitor() -> str:
         "  大きく影響するため、長期予報との併読を推奨します。",
     ]
     return "\n".join(out)
+
+
+def _parse_intensity(maxi: str) -> float:
+    """震度文字列（'5-', '5+', '6-', '6+' 等）を数値に変換する"""
+    if not maxi:
+        return 0
+    maxi = str(maxi).strip()
+    if maxi.endswith("-"):
+        return float(maxi[:-1]) - 0.1
+    if maxi.endswith("+"):
+        return float(maxi[:-1]) + 0.1
+    try:
+        return float(maxi)
+    except ValueError:
+        return 0
+
+
+async def _get_earthquake_info(min_intensity: int = 0, count: int = 10) -> str:
+    """最近の地震情報を取得して整形する"""
+    try:
+        items = fetch_json(QUAKE_LIST_URL)
+    except requests.exceptions.RequestException as e:
+        return f"エラー: 地震情報の取得に失敗しました。\n詳細: {e}"
+
+    if not items:
+        return "エラー: 地震情報データが空です。"
+
+    # 震度フィルタ
+    if min_intensity > 0:
+        items = [d for d in items if _parse_intensity(d.get("maxi", "")) >= min_intensity]
+        if not items:
+            return f"震度{min_intensity}以上の地震情報は見つかりませんでした。"
+
+    count = min(max(1, count), 50)
+    items = items[:count]
+
+    intensity_label = f"（震度{min_intensity}以上）" if min_intensity > 0 else ""
+    lines = [f"【最近の地震情報{intensity_label} 最新{len(items)}件】", ""]
+
+    for item in items:
+        at       = format_date_jp(item.get("at", ""))
+        anm      = item.get("anm", "不明")
+        mag      = item.get("mag", "—")
+        maxi     = item.get("maxi", "—")
+        ttl      = item.get("ttl", "")
+
+        maxi_str = f"震度{maxi}" if maxi and maxi != "—" else "震度情報なし"
+        mag_str  = f"M{mag}" if mag and mag != "—" else "規模不明"
+
+        lines.append(f"■ {at}")
+        lines.append(f"  震央: {anm}　{mag_str}　最大{maxi_str}")
+        if ttl:
+            lines.append(f"  種別: {ttl}")
+        lines.append("")
+
+    lines.append("出典: 気象庁 https://www.jma.go.jp/bosai/quake/")
+    return "\n".join(lines).rstrip()
+
+
+async def _get_tsunami_info() -> str:
+    """津波情報・津波予報を取得して整形する"""
+    try:
+        items = fetch_json(TSUNAMI_LIST_URL)
+    except requests.exceptions.RequestException as e:
+        return f"エラー: 津波情報の取得に失敗しました。\n詳細: {e}"
+
+    if not items:
+        return "現在、発表中の津波情報はありません。\n\n出典: 気象庁 https://www.jma.go.jp/bosai/tsunami/"
+
+    lines = [f"【津波情報 最新{len(items)}件】", ""]
+
+    for item in items:
+        rdt  = format_date_jp(item.get("rdt", ""))
+        at   = format_date_jp(item.get("at", ""))
+        anm  = item.get("anm", "不明")
+        mag  = item.get("mag", "—")
+        ttl  = item.get("ttl", "")
+        ift  = item.get("ift", "")
+
+        lines.append(f"■ {ttl}（{ift}）　発表: {rdt}")
+        lines.append(f"  震源: {anm}　M{mag}　地震発生: {at}")
+
+        # 津波予報の種別一覧
+        kinds = item.get("kind", [])
+        unique_kinds = list(dict.fromkeys(k.get("kind", "") for k in kinds if k.get("kind")))
+        if unique_kinds:
+            lines.append(f"  予報種別: {' / '.join(unique_kinds[:3])}")
+
+        lines.append("")
+
+    lines.append("出典: 気象庁 https://www.jma.go.jp/bosai/tsunami/")
+    return "\n".join(lines).rstrip()
 
 
 async def main():
