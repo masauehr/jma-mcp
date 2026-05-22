@@ -1946,7 +1946,7 @@ async def _get_early_weather_info(region_input: str = "0") -> str:
             "早期天候情報は2週間先に顕著な高温・低温・多雪などが予想される",
             "場合にのみ発表されます（毎週月・木曜日）。",
             "",
-            f\"出典: 気象庁 {page_url}\",
+            f"出典: 気象庁 {page_url}",
         ]
         return "\n".join(out)
 
@@ -1962,7 +1962,7 @@ async def _get_early_weather_info(region_input: str = "0") -> str:
             "早期天候情報は2週間先に顕著な高温・低温・多雪などが予想される",
             "場合にのみ発表されます（毎週月・木曜日）。",
             "",
-            f\"出典: 気象庁 {page_url}\",
+            f"出典: 気象庁 {page_url}",
         ]
         return "\n".join(out)
 
@@ -1981,7 +1981,7 @@ async def _get_early_weather_info(region_input: str = "0") -> str:
 
     out += [
         "",
-        f\"出典: 気象庁 {page_url}\",
+        f"出典: 気象庁 {page_url}",
     ]
     return "\n".join(out)
 

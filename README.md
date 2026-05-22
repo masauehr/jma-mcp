@@ -308,6 +308,61 @@ jma_mcp/
 
 ---
 
+## トラブルシューティング
+
+### `/mcp` で `Failed to reconnect to jma: -32000` が出る
+
+MCPサーバー（`server.py`）の起動に失敗している。まず直接起動して原因を確認する。
+
+```bash
+python3 /Users/masahiro/projects/jma_mcp/server.py
+```
+
+#### よくある原因1: server.py の構文エラー
+
+f文字列中のバックスラッシュエスケープ（`f\"...\"` ）はPythonではSyntaxErrorになる。
+以下のように修正する。
+
+```python
+# NG（エラー）
+f\"出典: 気象庁 {page_url}\"
+
+# OK
+f"出典: 気象庁 {page_url}"
+```
+
+修正後に構文チェック:
+
+```bash
+python3 -m py_compile /Users/masahiro/projects/jma_mcp/server.py && echo "OK"
+```
+
+#### よくある原因2: MCPサーバーが未登録
+
+`claude mcp add` コマンドで登録する（`settings.json` の `mcpServers` には書けない）。
+
+```bash
+claude mcp add jma python3 /Users/masahiro/projects/jma_mcp/server.py
+```
+
+登録後、Claude Code を再起動するか `/mcp` で再接続する。
+
+### Claude Code への登録方法（推奨）
+
+`.mcp.json` を作る方法より `claude mcp add` コマンドが確実。
+
+```bash
+# 登録
+claude mcp add jma python3 /Users/masahiro/projects/jma_mcp/server.py
+
+# 登録確認
+claude mcp list
+```
+
+登録情報は `~/.claude.json`（プロジェクトスコープ）に保存される。
+
+---
+
 ## 設計判断メモ
 
 ### なぜ stdio ベースか
