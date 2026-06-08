@@ -130,6 +130,10 @@ Claude Code（結果を受け取り、回答に組み込む）
 | `data.jma.go.jp /stats/data/mdrr/rank_update/d{MMDD}.html` | 観測史上1位の値 更新状況 | `get_record_update` |
 | `data.jma.go.jp /risk/probability/guidance/download2w.php?2week_t_{num}.csv` | 2週間気温予報（確率CSV） | `get_twoweek_forecast` |
 | `data.jma.go.jp /risk/probability/guidance/download.php?month1_t_{num}.csv` | 1ヶ月予報（確率CSV） | `get_monthly_forecast` |
+| `/bosai/tidelevel/data/tide/tide_time.json` | 潮位データ基準時刻 | `get_tide_observation` |
+| `/bosai/tidelevel/data/tide/tide_obs_{YYYYMMDD}_{code}.json` | 潮位観測データ（15秒間隔・最大5760点/日） | `get_tide_observation` |
+| `/bosai/tidelevel/const/tide_astro/tide_astro_{YYYY}_{code}.json` | 天文潮位（1時間間隔・年間データ） | `get_tide_observation` |
+| `/bosai/tidelevel/const/tide_area.json` | 全国潮位観測所一覧（全国39地区166局） | `search_tide_stations` |
 
 ### JSONデータの変換処理
 
@@ -187,6 +191,13 @@ Claude Code（結果を受け取り、回答に組み込む）
 | `get_monthly_forecast` | 1ヶ月予報（7/14/28日間平均・確率付き）を地域別に取得 | `region_num`（地域番号11〜34、省略=関東甲信） |
 | `get_3month_forecast` | 3ヶ月予報の解説資料URL・掲載内容の概要を取得 | なし |
 | `get_6month_forecast` | 暖候期・寒候期予報（6ヶ月見通し）の解説資料URL・概要を取得 | なし |
+
+### 潮位観測系（観測点コード指定）
+
+| ツール名 | 説明 | 引数 |
+|---|---|---|
+| `get_tide_observation` | 観測点コードを指定して現在の潮位・天文潮位・気象偏差（高潮指標）・過去数時間の推移を取得 | `station_code`（必須）, `hours_back`（デフォルト3・最大12） |
+| `search_tide_stations` | 全国の潮位観測所を名前・住所キーワードで検索して観測点コードを調べる | `keyword`（省略時は全国一覧） |
 
 #### `get_twoweek_forecast` / `get_monthly_forecast` の地域番号
 
@@ -287,6 +298,10 @@ Claude Code のチャットで自然言語で質問するだけです。
 「沖縄の最高気温を全地点確認したい」
 「今日、観測史上1位を更新した地点は？」
 「北海道の積雪上位10地点は？」
+「那覇の現在の潮位を教えて」
+「宮崎の潮位偏差（高潮）の状況は？」
+「石垣島の潮位を過去6時間で見せて」
+「潮位観測所のコードを調べたい（宮崎）」
 ```
 
 Claudeが自動でツールを選択し、気象庁から最新データを取得して回答します。
