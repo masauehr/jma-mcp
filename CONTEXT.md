@@ -27,7 +27,9 @@ MCPサーバーとして実装する。Claude Code から自然言語で天気�
 | `get_weekly_forecast` | `area_code: str` | 週間天気予報を取得 |
 | `get_overview` | `area_code: str` | 概況テキストを取得 |
 | `search_area` | `name: str` | エリア名からエリアコードを検索 |
-| `get_warning` | `area_code: str` | 警報・注意報発表状況を取得 |
+| `get_warning` | `area_code: str` | 警報・注意報発表状況を取得（新体系: レベル付き） |
+| `get_warning_timeline` | `area_code, municipality` | 時系列情報（3時間ごとの警報等の見通し）を取得 |
+| `get_typhoon` | `typhoon_number` | 発生中の台風の実況・進路予報を取得 |
 | `get_early_warning` | `area_code: str` | 早期注意情報（警報級の可能性）を取得 |
 | `get_mdrr_data` | `element, prefecture, top_n` | 全国観測値（気温・降水量・風速・積雪等）を取得 |
 | `get_daily_ranking` | `date, element` | 全国観測値ランキングを取得 |
@@ -156,10 +158,10 @@ if __name__ == "__main__":
 
 ## 予定している変更
 
-### WARNING_CODE_MAP のレベル付き名称への変更（2026年5月28日午後以降）
+### ✅ 実施済み（2026-09-24）: WARNING_CODE_MAP のレベル付き名称への変更と、新体系（r8）への配信先の移行
 
 **2026年5月28日（水）午後**に気象庁コード表が改定され、大雨・高潮・土砂災害系の警報・注意報に
-レベル番号付きの正式名称が導入される。それ以降に `server.py` の `WARNING_CODE_MAP` を修正すること。
+レベル番号付きの正式名称が導入される。**→ 実施済み。** あわせて、警報・早期注意情報・気象情報が `data/r8/` に移転し形式が変わっていた（旧パスは 5/28 のまま凍結）ため、URL・パーサーを更新し、`get_warning_timeline`（時系列情報）と `get_typhoon`（台風の実況・予報）を追加した。詳細は [jma-mcp.md](jma-mcp.md)。
 
 | コード | 現在 | 変更後 |
 |---|---|---|

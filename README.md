@@ -119,14 +119,19 @@ Claude Code（結果を受け取り、回答に組み込む）
 気象庁の防災情報ページ（bosai.jma.go.jp）が内部で使用しているAPIと同一です。
 **認証不要・無料で利用可能**（利用規約の遵守が必要）。
 
+> ⚠️ **2026-05-28 の防災気象情報の新体系への移行で、警報・早期注意情報・気象情報・台風情報の配信先が変わった**（`data/r8/` へ移転。旧パスは 5/28 のまま凍結）。詳細と旧新対応表は [jma-mcp.md](jma-mcp.md) の「2026-05-28 の新体系への対応」。
+
 | エンドポイント | 取得データ | 使用ツール |
 |---|---|---|
 | `/bosai/forecast/data/forecast/{code}.json` | 3日間予報・週間予報 | `get_forecast` / `get_weekly_forecast` |
 | `/bosai/forecast/data/overview_forecast/{code}.json` | 天気概況テキスト | `get_overview` |
-| `/bosai/warning/data/warning/{code}.json` | 警報・注意報発表状況 | `get_warning` |
-| `/bosai/probability/data/probability/{code}.json` | 早期注意情報（警報級の可能性） | `get_early_warning` |
-| `/bosai/information/data/information.json` | 気象情報一覧（府県・地方・全般） | `get_information` |
-| `/bosai/information/data/denbun/{json_name}.json` | 気象情報本文（見出し＋解説文） | `get_information`（内部利用） |
+| `/bosai/warning/data/r8/{code}.json` | 警報・注意報発表状況（新体系: 報のリスト形式） | `get_warning` |
+| `/bosai/warning/data/r8/map_time.json` | 警報システム全体の最終更新 | `get_warning`（内部利用） |
+| `/bosai/warning_timeline/data/{code}.json` | 時系列情報（3時間ごとの警報等の見通し） | `get_warning_timeline` |
+| `/bosai/probability/data/probability/r8/{code}.json` | 早期注意情報（警報級の可能性） | `get_early_warning` |
+| `/bosai/information/data/r8/information.json` | 気象情報一覧（府県・地方・全般） | `get_information` |
+| `/bosai/information/data/r8/denbun/{json_name}.json` | 気象情報本文（見出し＋解説文） | `get_information`（内部利用） |
+| `/bosai/typhoon/data/targetTc.json` ほか | 発生中の台風の実況・進路予報 | `get_typhoon` |
 | `data.jma.go.jp /stats/data/mdrr/{category}/alltable/{elem}_rct.csv` | 最新観測値（降水量・気温・風速・積雪 等） | `get_mdrr_data` |
 | `data.jma.go.jp /stats/data/mdrr/rank_daily/data{MMDD}.html` | 全国観測値ランキング（上位10地点） | `get_daily_ranking` |
 | `data.jma.go.jp /stats/data/mdrr/rank_update/d{MMDD}.html` | 観測史上1位の値 更新状況 | `get_record_update` |
@@ -172,9 +177,11 @@ Claude Code（結果を受け取り、回答に組み込む）
 | `get_forecast` | 3日間の短期天気予報を取得 | `area_code` |
 | `get_weekly_forecast` | 週間天気予報を取得 | `area_code` |
 | `get_overview` | 天気概況テキストを取得 | `area_code` |
-| `get_warning` | 警報・注意報の発表状況を取得 | `area_code` |
+| `get_warning` | 警報・注意報の発表状況を取得（新体系: レベル付き・市町村別・特記事項） | `area_code` |
+| `get_warning_timeline` | 時系列情報（3時間ごとの警報等の見通し）を取得。注意以上の見通しがある市町村を表示 | `area_code`, `municipality`（省略可） |
 | `get_early_warning` | 早期注意情報（警報級の可能性）と気象台コメントを取得 | `area_code` |
 | `get_forecaster_comment` | 気象台からのコメント（警報等の見込み・特記事項）を取得 | `area_code` |
+| `get_typhoon` | 発生中の台風の実況・進路予報を取得 | `typhoon_number`（省略可） |
 | `get_information` | 気象情報（府県・地方・全般）の見出し＋本文を取得 | `area_code`（省略可）, `info_type`（省略可） |
 
 ### 気象の状況・観測値系（全国データ）
