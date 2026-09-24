@@ -285,6 +285,8 @@ python3 server.py
 }
 ```
 
+> **注意（接続失敗の原因になりやすい）**: `command` の `python3` が、`mcp` パッケージ未導入の Python（別の仮想環境など）に解決されると、`ModuleNotFoundError: mcp` で **「Connection closed」** となり接続に失敗する。`mcp` と `requests` を導入した Python の**絶対パス**（例: `/opt/homebrew/bin/python3`）を `command` に指定すること。確認: `/opt/homebrew/bin/python3 -c 'import mcp, requests'`。
+
 > **注意**: `args` にはサーバーの**絶対パス**を指定すること。
 
 ### 5. Claude Code で確認
@@ -324,6 +326,7 @@ jma_mcp/
 ├── server.py          # MCPサーバー本体（ツール定義・API取得・整形）
 ├── areas.py           # エリアコードマスター（全国の地域コード一覧）
 ├── requirements.txt   # 依存パッケージ（mcp, requests）
+├── tests/             # テスト（新体系対応。`/opt/homebrew/bin/python3 -m unittest discover -s tests`）
 ├── .gitignore         # __pycache__, .mcp.json 等を除外
 ├── CLAUDE.md          # Claude Code向け作業指示
 ├── CONTEXT.md         # セッション引き継ぎ情報

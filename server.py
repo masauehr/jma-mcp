@@ -1219,6 +1219,20 @@ def format_warning(area_name, area_code, reports, system_updated=None) -> str:
             if clr:
                 cleared20.setdefault(it["areaCode"], []).extend(clr)
 
+    # サマリー行（複数地域を機械的に集計する際に「発表中」「解除」の見出しを読み飛ばしても
+    # 誤判定しないよう、この1行だけで発表中の有無・種別が分かるようにする）
+    if active10 or active20:
+        names = []
+        for ws in list(active10.values()) + list(active20.values()):
+            for w in ws:
+                n = w.split("（")[0]
+                if n not in names:
+                    names.append(n)
+        lines.append(f"■ サマリー: 発表中あり → {'・'.join(names)}")
+    else:
+        lines.append("■ サマリー: 発表中の警報・注意報なし（解除済みのものは下記「解除」欄を参照）")
+    lines.append("")
+
     def label10(code):
         return WARNING_AREA_NAME_MAP.get(code) or master_name("class10s", code)
 
