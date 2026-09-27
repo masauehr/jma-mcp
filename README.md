@@ -178,7 +178,7 @@ Claude Code（結果を受け取り、回答に組み込む）
 | `get_weekly_forecast` | 週間天気予報を取得 | `area_code` |
 | `get_overview` | 天気概況テキストを取得 | `area_code` |
 | `get_warning` | 警報・注意報の発表状況を取得（新体系: レベル付き・市町村別・特記事項） | `area_code` |
-| `get_warning_timeline` | 時系列情報（3時間ごとの警報等の見通し）を取得。注意以上の見通しがある市町村を表示 | `area_code`, `municipality`（省略可） |
+| `get_warning_timeline` | 時系列情報（3時間ごとの警報等の見通し）を取得。危険度（注意以上）と予報値（最大風速・風向・波高・潮位・1時間最大雨量）を表示 | `area_code`, `municipality`（省略可）, `element`（省略可） |
 | `get_early_warning` | 早期注意情報（警報級の可能性）を地域ごとの表（行＝現象、列＝時間区分。値は高/中/－）で取得。短期は6時間ごと（明後日まで）・週間は日ごと。全現象行と気象台コメントを出力 | `area_code` |
 | `get_forecaster_comment` | 気象台からのコメント（警報等の見込み・特記事項）を取得 | `area_code` |
 | `get_typhoon` | 発生中の台風の実況・進路予報を取得 | `typhoon_number`（省略可） |

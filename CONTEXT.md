@@ -28,7 +28,7 @@ MCPサーバーとして実装する。Claude Code から自然言語で天気�
 | `get_overview` | `area_code: str` | 概況テキストを取得 |
 | `search_area` | `name: str` | エリア名からエリアコードを検索 |
 | `get_warning` | `area_code: str` | 警報・注意報発表状況を取得（新体系: レベル付き） |
-| `get_warning_timeline` | `area_code, municipality` | 時系列情報（3時間ごとの警報等の見通し）を取得 |
+| `get_warning_timeline` | `area_code, municipality, element` | 時系列情報（3時間ごとの警報等の見通し）を取得。危険度＋予報値（最大風速・風向・波高・潮位・1時間最大雨量）。`element` で項目を絞り込める |
 | `get_typhoon` | `typhoon_number` | 発生中の台風の実況・進路予報を取得 |
 | `get_early_warning` | `area_code: str` | 早期注意情報（警報級の可能性）を取得 |
 | `get_mdrr_data` | `element, prefecture, top_n` | 全国観測値（気温・降水量・風速・積雪等）を取得 |
